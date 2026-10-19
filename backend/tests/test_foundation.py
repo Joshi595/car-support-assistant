@@ -1,18 +1,11 @@
 import json
 import logging
-import shutil
-from pathlib import Path
 
 import pytest
-from alembic import command
-from alembic.config import Config
 from sqlalchemy import create_engine, text
 
-from car_support.config import Settings, get_settings
-from car_support.db.session import get_engine
+from car_support.config import Settings
 from car_support.observability import JsonFormatter, request_id
-
-BACKEND = Path(__file__).resolve().parent.parent
 
 
 def test_settings_read_prefixed_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -34,17 +27,8 @@ def test_json_log_carries_request_id_and_fields() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(shutil.which("docker") is None, reason="Docker not installed")
-def test_migrations_run_on_real_postgres(monkeypatch: pytest.MonkeyPatch) -> None:
-    from testcontainers.community.postgres import PostgresContainer
-
-    with PostgresContainer("pgvector/pgvector:pg16", driver="psycopg") as pg:
-        url = pg.get_connection_url()
-        monkeypatch.setenv("CS_DATABASE_URL", url)
-        get_settings.cache_clear()
-        get_engine.cache_clear()
-
-        command.upgrade(Config(str(BACKEND / "alembic.ini")), "head")
-
-        with create_engine(url).connect() as conn:
-            assert conn.scalar(text("SELECT extname FROM pg_extension WHERE extname = 'vector'")) == "vector"
+def test_migrations_create_pgvector_and_tables(database_url: str) -> None:
+    with create_engine(database_url).connect() as conn:
+        assert conn.scalar(text("SELECT extname FROM pg_extension WHERE extname = 'vector'")) == "vector"
+        tables = set(conn.scalars(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")))
+    assert {"documents", "chunks", "kb_versions"} <= tables
