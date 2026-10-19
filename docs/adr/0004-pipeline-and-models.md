@@ -31,8 +31,10 @@ understand ─┬─ question ──────► retrieve ─┬─ relevant 
 
 | Chat model | Routed | Correct | Cites relevant | Latency |
 |---|---|---|---|---|
-| gemma3:4b (local, default) | see `backend/eval/results/answers-ollama-gemma3-4b.md` | | | 1.6–2.8 s with both models resident |
+| **gemma3:4b** (local, default) | **95%** | **86%** | **87%** | 1.6–2.8 s with both models resident |
 | gpt-oss-120b (Groq free tier), before the Phase 4 fixes | 93% | 79% | 90% | median 6.9 s |
+
+Per category for gemma3:4b: recall and charger tools, out-of-scope refusals, version questions, cross-lingual and public-document questions 100%; German 95%; natural 83%; multi-part 0% (refused as a whole). Before the fixes in this phase, the same model scored 91% / 83% / 88%, with tool routing at 20–40%. Full report: [`backend/eval/results/answers-ollama-gemma3-4b.md`](../../backend/eval/results/answers-ollama-gemma3-4b.md).
 
 *Correct* requires every expected fact and no forbidden fact. The grader normalises number formats ("100.000" = "100 000" = "100,000"), Unicode spaces and hyphens; the golden set lists equivalent phrasings ("15p|15 pence"). Answer quality beyond facts (faithfulness, helpfulness) is judged by an LLM in Phase 9.
 

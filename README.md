@@ -4,7 +4,7 @@ A production-grade customer-support assistant for a (fictional) car maker. It an
 
 Everything runs on free, open-source software. Running locally needs no account, API key or payment.
 
-> **Status:** Phase 3 (retrieval) complete: Hit@1 87%, Hit@4 97% on 146 golden questions ([ADR 0003](docs/adr/0003-retrieval.md)). The roadmap is in [docs/plan.md](docs/plan.md).
+> **Status:** Phase 4 (pipeline) complete: on 184 golden questions the local gemma3:4b pipeline routes 95% correctly and answers 86% fully correctly with citations ([ADR 0004](docs/adr/0004-pipeline-and-models.md)). The roadmap is in [docs/plan.md](docs/plan.md).
 
 ## Quick start (development)
 
