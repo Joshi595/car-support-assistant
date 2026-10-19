@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # "groq:openai/gpt-oss-20b,ollama:gemma3:4b". Empty = no fallback.
     fallback_chat_model: str = ""
     groq_api_key: SecretStr | None = None  # free key from console.groq.com, used for "groq:..." models
+    # Optional injection classifier on top of the built-in rules, e.g.
+    # "groq:meta-llama/llama-prompt-guard-2-86m". It sends every customer message to Groq, so it is off by
+    # default (the local setup stays private).
+    prompt_guard_model: str = ""
+    prompt_guard_threshold: float = 0.5
 
     embed_model: str = "qwen3-embedding:4b"  # "qwen3-embedding:0.6b" for low-memory machines
     # Embed questions on the CPU (~0.5 s) so the chat model stays loaded on a small GPU; swapping the two

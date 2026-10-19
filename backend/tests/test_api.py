@@ -179,3 +179,10 @@ def test_cache_key_ignores_case_and_punctuation_but_not_market_or_date(database_
         assert cache_key("how long is the PAINT warranty", "uk", "en", date(2026, 10, 20), s) == base
         assert cache_key("How long is the paint warranty?", "us", "en", date(2026, 10, 20), s) != base
         assert cache_key("How long is the paint warranty?", "uk", "en", date(2026, 10, 21), s) != base
+
+
+@pytest.mark.integration
+def test_answers_keep_company_phone_numbers(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    final = {"answer": "Call our hotline on 01632 960 000 [1].", "outcome": "answer", "sources": []}
+    run = _chat(client, monkeypatch, final, message="What is your phone number?")
+    assert run["events"][-1][1]["answer"] == final["answer"]  # a regression: redact() used to hide it

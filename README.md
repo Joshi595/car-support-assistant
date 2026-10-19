@@ -4,7 +4,7 @@ A production-grade customer-support assistant for a (fictional) car maker. It an
 
 Everything runs on free, open-source software. Running locally needs no account, API key or payment.
 
-> **Status:** Phase 5 (backend API) complete. On 184 golden questions the local gemma3:4b pipeline routes 95% correctly and answers 86% fully correctly with citations ([ADR 0004](docs/adr/0004-pipeline-and-models.md)). The roadmap is in [docs/plan.md](docs/plan.md).
+> **Status:** Phase 6 (guardrails) complete ([ADR 0005](docs/adr/0005-guardrails.md)). On 184 golden questions the local gemma3:4b pipeline routes 95% correctly and answers 86% fully correctly with citations ([ADR 0004](docs/adr/0004-pipeline-and-models.md)). The roadmap is in [docs/plan.md](docs/plan.md).
 
 ## Quick start (development)
 
@@ -50,7 +50,7 @@ Code quality: `uv run ruff format . && uv run ruff check . && uv run mypy src te
 | `POST /v1/admin/reindex` | agent | Incremental re-index of `data/` in the background. |
 | `GET /healthz`, `GET /readyz` | ops | Liveness; readiness (database and Ollama reachable). |
 
-Agent routes need a signed token (HS256 JWT). Set `CS_AGENT_JWT_SECRET` in `.env`, then `uv run car-support agent-token you@example.com` prints one for development; in production the frontend's sign-in issues it. Customer messages are stored with personal data (emails, phone numbers, VINs, IBANs, card numbers) redacted. Knowledge-base answers are cached per question, market, language, date, index version and model.
+Agent routes need a signed token (HS256 JWT). Set `CS_AGENT_JWT_SECRET` in `.env`, then `uv run car-support agent-token you@example.com` prints one for development; in production the frontend's sign-in issues it. Personal data (emails, phone numbers, VINs, IBANs, card numbers) is redacted before any model sees a message and before it is stored; clear prompt-injection attempts are refused before any model call. Knowledge-base answers are cached per question, market, language, date, index version and model.
 
 ## Repository layout
 
