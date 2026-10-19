@@ -1,12 +1,14 @@
 """Evaluation against eval/golden.jsonl.
 
-    uv run python eval/run.py retrieval      # Hit@k / MRR per retrieval setup, relevance-gate analysis
+    uv run python eval/run.py retrieval   # Hit@k / MRR per retrieval setup, off-topic gate analysis
+    uv run python eval/run.py answers     # full pipeline: routing, facts, citations, latency
 
-Needs the indexed database and Ollama. Writes eval/results/retrieval.md.
+Needs the indexed database and Ollama. Reports go to eval/results/.
 """
 
 import argparse
 import json
+import re
 import statistics
 import sys
 import time
@@ -124,20 +126,133 @@ def setup(mode: Mode, keyword_weight: float = 0.0, k: int = 10) -> Setup:
     return run
 
 
+# ── End-to-end answers ─────────────────────────────────────────────────────────
+
+# Which pipeline outcomes satisfy each expected route of the golden set.
+ROUTE_OUTCOMES = {
+    "kb": {"answer"},
+    "refuse": {"refuse", "off_topic"},
+    "recall": {"recall"},
+    "charger": {"chargers", "unavailable"},  # "unavailable" when no Open Charge Map key is configured
+    "handoff": {"handoff"},
+}
+
+
+_SPACES = str.maketrans(
+    {"\u202f": " ", "\u00a0": " ", "\u2009": " ", "\u2011": "-", "\u2010": "-", "\u2019": "'"}
+)
+
+
+def normalize(text: str) -> str:
+    """Make equivalent spellings comparable: "100.000", "100,000" and "100 000" all become "100000";
+    "70 %" becomes "70%"; typographic spaces, hyphens and apostrophes become plain ones."""
+    text = text.translate(_SPACES).lower()
+    text = re.sub(r"(?<=\d)[ ,.](?=\d{3}\b)", "", text)
+    return re.sub(r"(?<=\d) %", "%", text)
+
+
+def has_fact(answer: str, fact: str) -> bool:
+    text = normalize(answer)
+    return any(normalize(alt) in text for alt in fact.split("|"))
+
+
+def grade(case: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
+    """Deterministic checks; the LLM judge (Phase 9) adds faithfulness and correctness on top."""
+    answer = out["answer"]
+    routed = out["outcome"] in ROUTE_OUTCOMES[case["route"]]
+    facts_ok = routed and all(has_fact(answer, f) for f in case["facts"])
+    leaked = [f for f in case.get("forbidden", []) if has_fact(answer, f)]
+    cited = [out["passages"][n - 1] for n in out.get("citations", [])]
+    cites_relevant = bool(cited) and first_relevant_rank(case, cited) is not None
+    return {
+        "routed": routed,
+        "correct": facts_ok and not leaked,
+        "leaked": leaked,
+        "cites_relevant": cites_relevant if case["route"] == "kb" else None,
+    }
+
+
+def answers_report(part: int = 1, parts: int = 1) -> str:
+    from car_support.pipeline.graph import build_graph, new_state
+
+    graph = build_graph()
+    rows: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any], float]] = []
+    # Free cloud tiers cap tokens per day: --part 1/2 and 2/2 split one run across days.
+    for case in GOLDEN[part - 1 :: parts]:
+        state = new_state(case["question"], case["market"], [tuple(t) for t in case.get("history", [])])
+        state["as_of"] = filters_for(case).as_of
+        started = time.perf_counter()
+        try:
+            out = graph.invoke(state)
+        except Exception as exc:  # a crash is a failed question, not a failed evaluation
+            out = {"answer": f"ERROR: {exc}", "outcome": "error", "passages": [], "citations": []}
+        rows.append((case, out, grade(case, out), time.perf_counter() - started))
+
+    settings = get_settings()
+    latencies = sorted(r[3] for r in rows)
+    lines = [
+        f"## End to end: {len(rows)} golden questions, {date.today()}",
+        "",
+        f"Chat model `{settings.chat_model}`, embeddings `{settings.embed_model}`, retrieval "
+        f"`{settings.retrieval_mode}`. *Routed*: the pipeline took the expected path (answer, refuse, tool, "
+        "handoff). *Correct*: routed, every expected fact present, no forbidden fact (e.g. another market's "
+        "number). *Cites relevant*: an answer cites a passage from the expected section.",
+        "",
+        f"Latency per question: median {statistics.median(latencies):.1f} s, "
+        f"p95 {latencies[int(0.95 * (len(latencies) - 1))]:.1f} s.",
+        "",
+        "| Category | n | Routed | Correct | Cites relevant |",
+        "|---|---|---|---|---|",
+    ]
+    by_cat: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for case, _, g, _ in rows:
+        by_cat[case["category"]].append(g)
+    for cat, grades in [*sorted(by_cat.items()), ("**all**", [r[2] for r in rows])]:
+        cites = [g["cites_relevant"] for g in grades if g["cites_relevant"] is not None]
+        lines.append(
+            f"| {cat} | {len(grades)} | {pct([g['routed'] for g in grades])} | "
+            f"{pct([g['correct'] for g in grades])} | {pct(cites)} |"
+        )
+    lines += ["", "### Failures", ""]
+    for case, out, g, _ in rows:
+        if not g["correct"]:
+            why = (
+                "wrong route"
+                if not g["routed"]
+                else f"leaked {g['leaked']}"
+                if g["leaked"]
+                else "missing fact"
+            )
+            answer = out["answer"].replace("\n", " ")[:220]
+            lines.append(
+                f"- **{case['id']}** ({why}; outcome `{out['outcome']}`, expected `{case['route']}`) "
+                f"{case['question']}  \n  → {answer}"
+            )
+    return "\n".join(lines) + "\n"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("suite", choices=["retrieval"])
-    parser.parse_args()
-    report = retrieval_report(
-        {
-            "dense": setup("dense"),
-            "keyword (Postgres full-text)": setup("keyword"),
-            "hybrid, keyword weight 0.1": setup("hybrid", 0.1),
-            "hybrid, keyword weight 0.5": setup("hybrid", 0.5),
-        }
-    )
-    model = get_settings().embed_model.replace(":", "-")
-    out = EVAL_DIR / "results" / f"retrieval-{model}.md"
+    parser.add_argument("suite", choices=["retrieval", "answers"])
+    parser.add_argument("--part", default="1/1", help="answers only: run every n-th question, e.g. 2/3")
+    args = parser.parse_args()
+    suite = args.suite
+    part, parts = map(int, args.part.split("/"))
+    settings = get_settings()
+    if suite == "retrieval":
+        report = retrieval_report(
+            {
+                "dense": setup("dense"),
+                "keyword (Postgres full-text)": setup("keyword"),
+                "hybrid, keyword weight 0.1": setup("hybrid", 0.1),
+                "hybrid, keyword weight 0.5": setup("hybrid", 0.5),
+            }
+        )
+        name = f"retrieval-{settings.embed_model}"
+    else:
+        report = answers_report(part, parts)
+        name = f"answers-{settings.chat_model}" + (f"-part{part}of{parts}" if parts > 1 else "")
+    out = EVAL_DIR / "results" / (name.replace(":", "-").replace("/", "-") + ".md")
     out.parent.mkdir(exist_ok=True)
     out.write_text(report, encoding="utf-8")
     sys.stdout.write(report)
