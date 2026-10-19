@@ -1,6 +1,7 @@
 """Typed settings, read from environment variables (prefix CS_) or a .env file."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -11,6 +12,8 @@ class Settings(BaseSettings):
 
     environment: Literal["dev", "test", "prod"] = "dev"
     log_level: str = "INFO"
+
+    data_dir: Path = Path(__file__).resolve().parents[3] / "data"  # repo-root/data in a source checkout
 
     database_url: str = "postgresql+psycopg://car_support:car_support@localhost:5432/car_support"
 
