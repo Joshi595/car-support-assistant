@@ -36,7 +36,7 @@ def test_json_log_carries_request_id_and_fields() -> None:
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Docker not installed")
 def test_migrations_run_on_real_postgres(monkeypatch: pytest.MonkeyPatch) -> None:
-    from testcontainers.postgres import PostgresContainer
+    from testcontainers.community.postgres import PostgresContainer
 
     with PostgresContainer("pgvector/pgvector:pg16", driver="psycopg") as pg:
         url = pg.get_connection_url()
