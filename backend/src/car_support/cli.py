@@ -20,6 +20,10 @@ def main(argv: list[str] | None = None) -> None:
         "ingest", help="index data/ into Postgres (only changed chunks are embedded)"
     )
     ingest.add_argument("--full", action="store_true", help="drop the index and re-embed everything")
+    serve = commands.add_parser("serve", help="run the HTTP API")
+    serve.add_argument("--reload", action="store_true", help="restart on code changes (development)")
+    token = commands.add_parser("agent-token", help="print a signed agent token (development)")
+    token.add_argument("email")
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -29,6 +33,17 @@ def main(argv: list[str] | None = None) -> None:
             report = index_corpus(session, settings.data_dir, full=args.full)
         log.info("ingest finished", extra={"fields": asdict(report)})
         print(json.dumps(asdict(report), indent=2))
+
+    elif args.command == "serve":
+        import uvicorn
+
+        uvicorn.run(
+            "car_support.api.main:app", host=settings.api_host, port=settings.api_port, reload=args.reload
+        )
+    elif args.command == "agent-token":
+        from car_support.api.auth import issue_token
+
+        print(issue_token(args.email))
 
 
 if __name__ == "__main__":

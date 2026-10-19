@@ -45,7 +45,15 @@ class Settings(BaseSettings):
     retrieval_mode: Literal["dense", "hybrid", "keyword"] = "dense"
     candidates: int = 30  # per-ranker pool before fusion (hybrid mode)
     keyword_weight: float = 0.1  # weight of full-text ranks in hybrid fusion (dense = 1.0)
+    answer_cache: bool = True  # exact-match cache of knowledge-base answers (see pipeline/cache.py)
     relevance_threshold: float = 0.40  # top cosine similarity below this = clearly off-topic (ADR 0003)
+
+    # API
+    api_host: str = "127.0.0.1"
+    api_port: int = 8000
+    cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]  # the frontend
+    chat_rate_limit: str = "20/minute"  # per client IP
+    agent_jwt_secret: SecretStr | None = None  # shared with the frontend's Auth.js; unset = agent routes off
 
     # Live tools. Open Charge Map needs a free key (openchargemap.org); without one the tool says so.
     open_charge_map_key: str = ""
