@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     chat_model: str = "ollama:gemma3:4b"
     embed_model: str = "qwen3-embedding:0.6b"
 
+    chunk_max_chars: int = 1200  # longer sections are split further; each piece keeps the heading prefix
+    chunk_overlap: int = 150
+
 
 @lru_cache
 def get_settings() -> Settings:
