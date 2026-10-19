@@ -1,0 +1,58 @@
+# Metadata for every document under brand/ and public/.
+#
+# Path convention: <source_type>/<market>/<language>/<file>, where market "global" means all markets.
+# Everything derivable from the path is derived; this file only holds what the path cannot say.
+# Per-document entries override the defaults of their source type.
+
+[defaults.brand]
+licence = "Fictional sample data, MIT (this repository)"
+valid_from = 2026-01-01
+
+[defaults.public]
+licence = "OGL-3.0"
+attribution = "Contains public sector information licensed under the Open Government Licence v3.0."
+valid_from = 2026-10-19  # snapshot date (data/scripts/fetch_public.py)
+
+# ── Brand: versioned documents ─────────────────────────────────────────────
+# Two files share one doc_id; retrieval keeps the version valid on the query date.
+[docs."brand/uk/en/charging-tariffs-2027.md"]
+doc_id = "brand/uk/en/charging-tariffs"
+valid_from = 2027-01-01
+
+# ── Brand: model-specific documents ────────────────────────────────────────
+[docs."brand/global/en/model-aero.md"]
+models = ["aero"]
+
+[docs."brand/global/en/model-vela.md"]
+models = ["vela"]
+
+[docs."brand/global/en/model-ion-4.html"]
+models = ["ion-4"]
+
+[docs."brand/global/en/model-ion-x.html"]
+models = ["ion-x"]
+
+[docs."brand/global/en/ion-4-owners-manual.pdf"]
+models = ["ion-4"]
+
+[docs."brand/global/en/vela-owners-manual.pdf"]
+models = ["vela"]
+
+# ── Public: GOV.UK snapshots ───────────────────────────────────────────────
+[docs."public/uk/en/vehicle-recalls-and-faults.html"]
+url = "https://www.gov.uk/vehicle-recalls-and-faults"
+
+[docs."public/uk/en/consumer-protection-rights.html"]
+url = "https://www.gov.uk/consumer-protection-rights"
+
+[docs."public/uk/en/getting-an-mot.html"]
+url = "https://www.gov.uk/getting-an-mot"
+
+[docs."public/uk/en/vehicle-tax-rate-tables.html"]
+url = "https://www.gov.uk/vehicle-tax-rate-tables"
+
+[docs."public/uk/en/regulations-electric-vehicle-smart-charge-points.html"]
+url = "https://www.gov.uk/guidance/regulations-electric-vehicle-smart-charge-points"
+
+[docs."public/uk/en/driving-abroad.html"]
+url = "https://www.gov.uk/driving-abroad"

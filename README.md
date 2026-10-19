@@ -4,7 +4,7 @@ A production-grade customer-support assistant for a (fictional) car maker. It an
 
 Everything runs on free, open-source software. Running locally needs no account, API key or payment.
 
-> **Status:** Phase 0 (foundations). The roadmap is in [docs/plan.md](docs/plan.md).
+> **Status:** Phase 1 (knowledge base and golden set) complete. The roadmap is in [docs/plan.md](docs/plan.md).
 
 ## Quick start (development)
 
@@ -26,6 +26,8 @@ Code quality: `uv run ruff format . && uv run ruff check . && uv run mypy src te
 | Path | Contents |
 |---|---|
 | `backend/` | Python package `car_support` (config, logging, database), Alembic migrations, tests |
+| `data/` | Knowledge base: fictional brand corpus (DE/UK/US, EN/DE, md/html/pdf) and open-licensed public guidance, see [data/README.md](data/README.md) |
+| `backend/eval/golden.jsonl` | 184 evaluation questions across 16 categories, validated against the corpus by `tests/test_corpus.py` |
 | `compose.yaml` | Local infrastructure |
 | `.github/workflows/` | CI: format, lint, type check, unit + integration tests |
 | `docs/` | Plan and, later, architecture, runbook and decision records |
