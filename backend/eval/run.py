@@ -134,7 +134,7 @@ def setup(mode: Mode, keyword_weight: float = 0.0, k: int = 10) -> Setup:
 # Which pipeline outcomes satisfy each expected route of the golden set.
 ROUTE_OUTCOMES = {
     "kb": {"answer"},
-    "refuse": {"refuse", "off_topic"},
+    "refuse": {"refuse", "off_topic", "blocked"},
     "recall": {"recall"},
     "charger": {"chargers", "unavailable"},  # "unavailable" when no Open Charge Map key is configured
     "handoff": {"handoff"},

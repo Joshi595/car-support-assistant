@@ -128,7 +128,9 @@ def chat(request: Request, body: ChatRequest) -> StreamingResponse:
             reply = Message(
                 conversation_id=conversation_id,
                 role="assistant",
-                content=redact(final["answer"]),
+                # Not redact(): answers quote the company's own phone numbers; the graph already removed
+                # anything the customer typed (guardrails.scrub_echo).
+                content=final["answer"],
                 outcome=outcome,
                 citations=final.get("sources", []),
                 model=get_settings().chat_model,

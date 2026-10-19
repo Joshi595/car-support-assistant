@@ -1,12 +1,14 @@
 """The assistant as a LangGraph state machine.
 
-    understand ─┬─ question ──────► cache ─┬─ hit
+    guard ─┬─ injection ──► blocked
+          └─ understand ─┬─ question ──────► cache ─┬─ hit
                 │                          └─ miss ─► retrieve ─┬─ relevant ──► generate ─► validate ─► store
                 ├─ recall_lookup ─► recall                      └─ off-topic ─► refuse
                 ├─ charger_search ► chargers
                 ├─ human_agent ───► handoff
                 └─ off_topic ─────► off_topic
 
+`guard` refuses clear prompt-injection attempts before any model sees them.
 `understand` is one structured LLM call (intent, standalone question, language, tool arguments).
 Everything after it is deterministic except `generate`.
 """
@@ -22,6 +24,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from car_support.config import get_settings
 from car_support.db.session import get_session
+from car_support.guardrails import is_injection, leaks_prompt, redact, scrub_echo
 from car_support.llm import chat_model, structured_model
 from car_support.pipeline import cache, tools
 from car_support.pipeline.prompts import (
@@ -40,7 +43,9 @@ from car_support.retrieval import Filters, Passage, is_relevant, retrieve
 
 log = logging.getLogger(__name__)
 
-Outcome = Literal["answer", "refuse", "off_topic", "recall", "chargers", "handoff", "clarify", "unavailable"]
+Outcome = Literal[
+    "answer", "refuse", "off_topic", "blocked", "recall", "chargers", "handoff", "clarify", "unavailable"
+]
 
 
 class State(TypedDict, total=False):
@@ -85,11 +90,25 @@ def _fallback_understanding(question: str) -> Understanding:
     )
 
 
+def guard(s: State) -> State:
+    language = detect_language(s["question"])
+    if is_injection(s["question"]):
+        log.info("guard: prompt-injection attempt refused")
+        return {"language": language, "answer": OFF_TOPIC[language], "citations": [], "outcome": "blocked"}
+    return {"language": language}
+
+
+def route_guard(s: State) -> str:
+    return END if s.get("outcome") == "blocked" else "understand"
+
+
 def understand(s: State) -> State:
+    # Models only ever see redacted text; code that needs a VIN reads it from the original message.
     transcript = "\n".join(
-        f"{'Customer' if role == 'user' else 'Assistant'}: {text[:400]}" for role, text in s["history"][-6:]
+        f"{'Customer' if role == 'user' else 'Assistant'}: {redact(text)[:400]}"
+        for role, text in s["history"][-6:]
     )
-    prompt = UNDERSTAND_PROMPT.format(history=transcript or "(none)", question=s["question"])
+    prompt = UNDERSTAND_PROMPT.format(history=transcript or "(none)", question=redact(s["question"]))
     try:
         result = structured_model(Understanding).invoke([("user", prompt)])
     except Exception:  # model down, invalid JSON, provider error: degrade to rules, do not fail the request
@@ -98,7 +117,7 @@ def understand(s: State) -> State:
     if not result.standalone_question.strip():
         result = result.model_copy(update={"standalone_question": s["question"]})
     understanding = _check_tool_arguments(result, s["question"])
-    return {"understanding": understanding, "language": detect_language(s["question"])}
+    return {"understanding": understanding}
 
 
 def _check_tool_arguments(u: Understanding, question: str) -> Understanding:
@@ -162,6 +181,7 @@ def generate(s: State) -> State:
 
 
 _CITATION = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
+_RANGE = re.compile(r"\[(\d+)\s*[-\u2013]\s*(\d+)\]")  # "[1-4]" means [1, 2, 3, 4]
 # Models differ in citation brackets (gpt-oss writes U+3010 1 U+3011), spaces and hyphens (U+2011 in phones).
 _NORMALIZE = str.maketrans(
     {"\u3010": "[", "\u3011": "]", "\uff3b": "[", "\uff3d": "]"}  # citation brackets
@@ -180,7 +200,8 @@ def validate(s: State) -> State:
         return {}
     language = s["language"]
     answer, count = s["answer"].translate(_NORMALIZE), len(s["passages"])
-    if is_refusal(answer):
+    answer = _RANGE.sub(lambda m: "[" + ", ".join(map(str, range(int(m[1]), int(m[2]) + 1))) + "]", answer)
+    if is_refusal(answer) or leaks_prompt(answer):
         return {"answer": REFUSAL[language], "citations": [], "outcome": "refuse"}
 
     def keep_valid(m: re.Match[str]) -> str:
@@ -192,6 +213,7 @@ def validate(s: State) -> State:
     if not cited:
         log.info("validate: answer without valid citations replaced by refusal")
         return {"answer": REFUSAL[language], "citations": [], "outcome": "refuse"}
+    answer = scrub_echo(answer, s["question"])
     sources = [source(n, s["passages"][n - 1]) for n in cited]
     return {"answer": answer, "citations": cited, "sources": sources, "outcome": "answer"}
 
@@ -348,6 +370,7 @@ def off_topic(s: State) -> State:
 def build_graph() -> CompiledStateGraph[Any, Any, Any, Any]:
     g = StateGraph(State)
     for name, node in [
+        ("guard", guard),
         ("understand", understand),
         ("cache", cache_lookup),
         ("store", cache_store),
@@ -361,7 +384,8 @@ def build_graph() -> CompiledStateGraph[Any, Any, Any, Any]:
         ("off_topic", off_topic),
     ]:
         g.add_node(name, node)  # type: ignore[call-overload]
-    g.add_edge(START, "understand")
+    g.add_edge(START, "guard")
+    g.add_conditional_edges("guard", route_guard)
     g.add_conditional_edges("understand", route_intent)
     g.add_conditional_edges("cache", route_cache)
     g.add_conditional_edges("retrieve", route_relevance)
