@@ -49,7 +49,8 @@ Refresh the snapshots with `uv run python ../data/scripts/fetch_public.py` (from
 |---|---|---|
 | VIN decoding | [NHTSA vPIC](https://vpic.nhtsa.dot.gov/api/) | US government work, public domain; no key |
 | Recall lookup | [NHTSA Recalls API](https://api.nhtsa.gov/recalls/recallsByVehicle) | US government work, public domain; no key |
-| EV charger search | [Open Charge Map](https://openchargemap.org/site/develop/api) | Open data; free API key; attribution required |
+| Geocoding (place → coordinates) | [OpenStreetMap Nominatim](https://nominatim.org/release-docs/latest/api/Search/) | ODbL; max 1 request/s with an identifying User-Agent (results are cached) |
+| EV charger search | [Open Charge Map](https://openchargemap.org/develop) | Community data under CC BY 4.0 (attribution shown with every result); free API key in `CS_OPEN_CHARGE_MAP_KEY` |
 
 ## Adding a document
 
