@@ -141,6 +141,7 @@ Each phase ends with passing tests, the eval updated where relevant, and its own
 - Relevance gate: if the top rerank score is below a threshold (tuned on the eval), refuse without calling the LLM.
 - *Optional (Corrective-RAG idea):* when the gate fails, rewrite the query once and retry before refusing. Kept only if the eval shows a gain.
 - Eval: dense vs full-text vs hybrid vs hybrid+rerank, with and without filters. Each choice is justified by numbers in an ADR.
+- **Outcome:** the eval overturned the reranker. The final design is dense search with `qwen3-embedding:4b`, no reranker, and an off-topic gate on cosine similarity; see [ADR 0003](adr/0003-retrieval.md).
 
 ### Phase 4: Pipeline and models
 - `llm.py`: `init_chat_model` from config, with timeouts, retries and a fallback provider (e.g. Groq rate-limited → Ollama).
@@ -178,6 +179,12 @@ Each phase ends with passing tests, the eval updated where relevant, and its own
 - **Free public demo:** frontend on Vercel (Hobby); API on a Hugging Face Docker Space (CPU, with the Ollama embedder inside); Neon free Postgres (pgvector); Groq free-tier LLM. Deployed by `deploy-demo.yml`. Trade-offs: cold starts while the Space or Neon sleeps, and rate limits. The demo shows a "fictional brand data" banner. Free-tier limits are re-checked before setup.
 - Docs: README (quick start, architecture, eval results, decisions), `architecture.md`, `runbook.md` (re-index, rotate keys, add a market or language), `data-sources.md`, and ADRs for the main choices.
 
+### Phase 11: Learning guide, production edition (PDF), written last
+- A companion to `RAG_Project_Concepts_Guide.pdf`, in the same style and with the same box types (Key idea, Analogy, In this project, If you are asked, Pitfall), so it reads as "part 2" of that guide.
+- It explains **what changed from the prototype to production, how, and why**, chapter by chapter: data and catalog, conversion and chunking, Postgres + pgvector, incremental indexing, hybrid SQL search with filters and versions, embedding-model and reranker choices, the relevance gate, the LangGraph pipeline with router and tools, guardrails, the API, the frontend, observability, LLM-as-judge and CI, deployment and the zero-cost setup.
+- Every number comes from this repo's evals, ADRs and live runs (the ADRs and `backend/eval/results/` are the running log it draws on). It covers new concepts from scratch (e.g. Matryoshka embeddings, cross-encoders, SSE streaming, tracing, prompt injection) and ends with a glossary, a command cheat-sheet and likely interview questions with answers.
+- Delivered as HTML source in `docs/guide/` and rendered to PDF with headless Edge. A copy goes next to the original guide as `D:\Projects\BMW_RAG_Manideep\RAG_Production_Guide.pdf`.
+
 ## Verification (end-to-end)
 1. `make test` (unit + integration on real Postgres) and the frontend lint/build/Playwright tests are green; CI passes on every PR.
 2. `docker compose up` → all services healthy. `make ingest` indexes both corpora; a second run re-embeds 0 chunks; editing one section re-embeds only that chunk.
@@ -185,6 +192,7 @@ Each phase ends with passing tests, the eval updated where relevant, and its own
 4. In the UI: a DE and a UK warranty question (different correct answers), a German question, a follow-up, a VIN recall check, "chargers near Munich", an out-of-scope question → handoff → the ticket appears in the agent desk; thumbs-down → it appears in feedback.
 5. The Phoenix trace shows every node for those requests; Grafana shows them.
 6. The public demo URL answers end-to-end using Groq + Neon.
+7. The production guide PDF renders, and every number in it matches `backend/eval/results/` and the ADRs.
 
 ## Assumptions you may want to change
 - Repo name `car-support-assistant`; brand "Northwind Motors"; markets DE/UK/US; languages EN/DE.

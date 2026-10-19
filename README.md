@@ -4,11 +4,11 @@ A production-grade customer-support assistant for a (fictional) car maker. It an
 
 Everything runs on free, open-source software. Running locally needs no account, API key or payment.
 
-> **Status:** Phase 2 (ingestion and storage) complete. The roadmap is in [docs/plan.md](docs/plan.md).
+> **Status:** Phase 3 (retrieval) complete: Hit@1 87%, Hit@4 97% on 146 golden questions ([ADR 0003](docs/adr/0003-retrieval.md)). The roadmap is in [docs/plan.md](docs/plan.md).
 
 ## Quick start (development)
 
-Requirements: [uv](https://docs.astral.sh/uv/), [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Podman), [Ollama](https://ollama.com).
+Requirements: [uv](https://docs.astral.sh/uv/), [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Podman), [Ollama](https://ollama.com) with `ollama pull qwen3-embedding:4b` and `ollama pull gemma3:4b`.
 
 ```bash
 docker compose up -d                 # Postgres + pgvector (add --profile ollama if Ollama is not installed locally)
@@ -18,6 +18,7 @@ uv sync                              # install dependencies into backend/.venv
 uv run alembic upgrade head          # create the database schema
 uv run car-support ingest            # index data/ (incremental; --full to rebuild)
 uv run pytest                        # tests (integration tests need Docker)
+uv run python eval/run.py retrieval  # retrieval metrics -> eval/results/
 ```
 
 Code quality: `uv run ruff format . && uv run ruff check . && uv run mypy src tests alembic`. Install the git hooks once with `uv run pre-commit install`.
