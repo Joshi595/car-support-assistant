@@ -8,6 +8,7 @@ Needs the indexed database and Ollama. Reports go to eval/results/.
 
 import argparse
 import json
+import os
 import re
 import statistics
 import sys
@@ -17,6 +18,8 @@ from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 from typing import Any
+
+os.environ.setdefault("CS_ANSWER_CACHE", "false")  # every run measures the pipeline, not the cache
 
 from car_support.config import get_settings
 from car_support.db.session import get_session

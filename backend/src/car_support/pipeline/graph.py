@@ -1,7 +1,8 @@
 """The assistant as a LangGraph state machine.
 
-    understand ─┬─ question ──────► retrieve ─┬─ relevant ──► generate ─► validate
-                ├─ recall_lookup ─► recall    └─ off-topic ─► refuse
+    understand ─┬─ question ──────► cache ─┬─ hit
+                │                          └─ miss ─► retrieve ─┬─ relevant ──► generate ─► validate ─► store
+                ├─ recall_lookup ─► recall                      └─ off-topic ─► refuse
                 ├─ charger_search ► chargers
                 ├─ human_agent ───► handoff
                 └─ off_topic ─────► off_topic
@@ -19,9 +20,10 @@ from typing import Any, Literal, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from car_support.config import get_settings
 from car_support.db.session import get_session
 from car_support.llm import chat_model, structured_model
-from car_support.pipeline import tools
+from car_support.pipeline import cache, tools
 from car_support.pipeline.prompts import (
     ANSWER_PROMPT,
     HANDOFF,
@@ -54,6 +56,8 @@ class State(TypedDict, total=False):
     answer: str
     citations: list[int]  # 1-based numbers of the passages the answer cites
     outcome: Outcome
+    sources: list[dict[str, Any]]  # the cited passages, numbered as in the answer
+    cache_key: str
 
 
 def new_state(question: str, market: str, history: list[tuple[str, str]] | None = None) -> State:
@@ -114,7 +118,7 @@ def _check_tool_arguments(u: Understanding, question: str) -> Understanding:
 
 def route_intent(s: State) -> str:
     return {
-        "question": "retrieve",
+        "question": "cache",
         "recall_lookup": "recall",
         "charger_search": "chargers",
         "human_agent": "handoff",
@@ -188,7 +192,52 @@ def validate(s: State) -> State:
     if not cited:
         log.info("validate: answer without valid citations replaced by refusal")
         return {"answer": REFUSAL[language], "citations": [], "outcome": "refuse"}
-    return {"answer": answer, "citations": cited, "outcome": "answer"}
+    sources = [source(n, s["passages"][n - 1]) for n in cited]
+    return {"answer": answer, "citations": cited, "sources": sources, "outcome": "answer"}
+
+
+def source(n: int, p: Passage) -> dict[str, Any]:
+    """What the customer sees for a citation: where it comes from, under which licence, and the text."""
+    return {
+        "n": n,
+        "chunk_id": p.chunk_id,
+        "doc_id": p.doc_id,
+        "title": p.title,
+        "section": p.section,
+        "source_type": p.source_type,
+        "url": p.url,
+        "licence": p.licence,
+        "attribution": p.attribution,
+        "excerpt": p.content.split("\n", 1)[-1],
+    }
+
+
+# ── answer cache ───────────────────────────────────────────────────────────────
+
+
+def cache_lookup(s: State) -> State:
+    if not get_settings().answer_cache:
+        return {}
+    with get_session() as session:
+        key = cache.cache_key(
+            s["understanding"].standalone_question, s["market"], s["language"], s["as_of"], session
+        )
+        hit = cache.lookup(session, key)
+    if hit is None:
+        return {"cache_key": key}
+    citations = [src["n"] for src in hit.citations]
+    return {"answer": hit.answer, "sources": hit.citations, "citations": citations, "outcome": "answer"}
+
+
+def route_cache(s: State) -> str:
+    return END if s.get("outcome") == "answer" else "retrieve"
+
+
+def cache_store(s: State) -> State:
+    if s.get("cache_key") and s.get("outcome") == "answer":
+        with get_session() as session:
+            cache.store(session, s["cache_key"], s["answer"], s["sources"])
+    return {}
 
 
 def refuse(s: State) -> State:
@@ -300,6 +349,8 @@ def build_graph() -> CompiledStateGraph[Any, Any, Any, Any]:
     g = StateGraph(State)
     for name, node in [
         ("understand", understand),
+        ("cache", cache_lookup),
+        ("store", cache_store),
         ("retrieve", retrieve_passages),
         ("generate", generate),
         ("validate", validate),
@@ -312,8 +363,10 @@ def build_graph() -> CompiledStateGraph[Any, Any, Any, Any]:
         g.add_node(name, node)  # type: ignore[call-overload]
     g.add_edge(START, "understand")
     g.add_conditional_edges("understand", route_intent)
+    g.add_conditional_edges("cache", route_cache)
     g.add_conditional_edges("retrieve", route_relevance)
     g.add_edge("generate", "validate")
-    for terminal in ["validate", "refuse", "recall", "chargers", "handoff", "off_topic"]:
+    g.add_edge("validate", "store")
+    for terminal in ["store", "refuse", "recall", "chargers", "handoff", "off_topic"]:
         g.add_edge(terminal, END)
     return g.compile()
