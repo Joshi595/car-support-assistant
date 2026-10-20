@@ -41,10 +41,10 @@ def _is_match(kind: str, value: str) -> bool:
     return True
 
 
-def _redact(text: str, found: list[str] | None = None) -> str:
+def _redact(text: str, found: list[str] | None = None, keep: frozenset[str] = frozenset()) -> str:
     def substitute(kind: str) -> Callable[[re.Match[str]], str]:
         def replace(m: re.Match[str]) -> str:
-            if not _is_match(kind, m[0]):
+            if kind in keep or not _is_match(kind, m[0]):
                 return m[0]
             if found is not None:
                 found.append(m[0])
@@ -57,9 +57,10 @@ def _redact(text: str, found: list[str] | None = None) -> str:
     return text
 
 
-def redact(text: str) -> str:
-    """Replace emails, IBANs, VINs, payment cards and phone numbers with placeholders like [phone]."""
-    return _redact(text)
+def redact(text: str, keep: frozenset[str] = frozenset()) -> str:
+    """Replace emails, IBANs, VINs, payment cards and phone numbers with placeholders like [phone].
+    `keep` names kinds to leave in place, e.g. {"vin"} for the recall tool."""
+    return _redact(text, keep=keep)
 
 
 def scrub_echo(answer: str, customer_text: str) -> str:

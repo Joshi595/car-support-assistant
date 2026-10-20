@@ -87,7 +87,8 @@ def test_chat_streams_tokens_then_the_validated_answer(
     assert (
         conversation["messages"][0]["content"] == "My email is [email]. Battery warranty?"
     )  # stored redacted
-    assert run["fake"].calls[0]["question"].startswith("My email is jane@")  # the pipeline sees the original
+    # personal data never enters the pipeline (models, logs, traces); only a VIN would be kept
+    assert run["fake"].calls[0]["question"] == "My email is [email]. Battery warranty?"
 
 
 @pytest.mark.integration

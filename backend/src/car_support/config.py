@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     answer_cache: bool = True  # exact-match cache of knowledge-base answers (see pipeline/cache.py)
     relevance_threshold: float = 0.40  # top cosine similarity below this = clearly off-topic (ADR 0003)
 
+    # Observability. Traces go to a self-hosted Phoenix, e.g. "http://127.0.0.1:6006/v1/traces"; empty = off.
+    tracing_endpoint: str = ""
+
     # API
     api_host: str = "127.0.0.1"
     api_port: int = 8000

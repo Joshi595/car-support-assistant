@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: car-support
+    folder: Car Support
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

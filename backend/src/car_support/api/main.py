@@ -8,6 +8,7 @@ import httpx
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
@@ -16,15 +17,22 @@ from car_support.api import admin, chat
 from car_support.api.limits import limiter
 from car_support.config import get_settings
 from car_support.db.session import get_engine
-from car_support.observability import request_id, setup_logging
+from car_support.observability import request_id, setup_logging, setup_tracing
 
 settings = get_settings()
 setup_logging(settings.log_level)
+if settings.tracing_endpoint:
+    setup_tracing(settings.tracing_endpoint)
+
+_UNTRACED = {"/metrics", "/healthz", "/readyz"}  # scraped every few seconds: noise, not customer traffic
 
 app = FastAPI(
     title="Car Support Assistant API",
     version="0.1.0",
     description="Grounded answers with citations, live recall and charger lookups, and handoff to agents.",
+    # FastAPI's built-in OpenTelemetry spans join the pipeline traces. Its "logs" record validation errors
+    # with the raw input, which could contain a customer's personal data, so they stay off.
+    telemetry={"logs": False, "exclude": lambda scope: scope.get("path") in _UNTRACED},
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
@@ -51,6 +59,12 @@ async def tag_request(request: Request, call_next: Callable[[Request], Awaitable
 
 app.include_router(chat.router)
 app.include_router(admin.router)
+
+
+@app.get("/metrics", tags=["ops"], include_in_schema=False)
+def metrics() -> Response:
+    """Prometheus scrape endpoint."""
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/healthz", tags=["ops"])
