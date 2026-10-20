@@ -44,3 +44,18 @@ Per category for gemma3:4b: recall and charger tools, out-of-scope refusals, ver
 - **Memory:** the full local stack (Postgres, 4B embedder, 4B chat model) needs about 16 GB RAM with little else running. On smaller machines use `qwen3-embedding:0.6b` or a cloud chat model.
 - **Known weaknesses of the 4B model**, to watch in the LLM-judge evaluation: multi-part questions are often refused as a whole, it occasionally picks a figure from the wrong row (a plan price for another model), and it answers some prompt-injection attempts. The last one is addressed by the guardrails in Phase 6.
 - **Charger search** needs a free Open Charge Map key; without it, charger questions get the "unavailable, shall I connect you?" reply.
+
+## Update (Phase 9): LLM-judged evaluation
+
+With all guardrails active, `gemma3:4b` on the full golden set, graded by `qwen/qwen3.8-27b` on Groq (a different model family; 146 answered knowledge-base questions):
+
+| Routed | Correct (deterministic) | Cites a relevant passage | **Judge: faithful** | **Judge: correct** |
+|---|---|---|---|---|
+| 96% | 86% | 88% | **93%** | **87%** |
+
+The judge's correctness (87%) agrees with the keyword grader (86%), which cross-validates both. Prompt-injection questions now reach 100%. The judge adds what keyword checks cannot see, namely faithfulness. Its findings follow two patterns, both limits of a 4B model:
+
+- **Row confusion in tables and lists:** a value from the neighbouring row, such as the Aero's service-plan price given for the Ion, the Ion 4's towing limit given for the Ion X, or the Ion's excess-mileage rate given for the Vela.
+- **Right fact, wrong citation number.**
+
+These are the main argument for a larger chat model in production. The free-tier `gpt-oss-120b` is one config value away, and the nightly workflow measures it. Full report: [`backend/eval/results/answers-ollama-gemma3-4b.md`](../../backend/eval/results/answers-ollama-gemma3-4b.md).
