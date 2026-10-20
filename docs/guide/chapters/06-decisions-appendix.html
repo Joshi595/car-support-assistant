@@ -1,0 +1,227 @@
+<section class="part">
+  <div class="kicker">PART H</div>
+  <h1>Decisions and limits</h1>
+  <p class="lede">Every major decision, the evidence behind it, what is still weak, and the whole change from prototype to production on one page.</p>
+  <ul><li>24. Every decision and its evidence</li><li>25. Limitations, honestly</li><li>26. What changed, in one table</li></ul>
+</section>
+
+<section>
+  <h2><span class="num">24</span>Every decision and its evidence</h2>
+  <p>Each decision has a record (ADR) in <code>docs/adr/</code>: the context, the decision, the numbers and the consequences. An ADR is written when the decision is made, so the reasons are not reconstructed later from memory.</p>
+  <table>
+    <thead><tr><th>Decision</th><th>Evidence</th><th>ADR</th></tr></thead>
+    <tbody>
+      <tr><td>One Postgres + pgvector store</td><td>Stateless API; dense, keyword and filters in one query; app data in the same database</td><td>0001</td></tr>
+      <tr><td>Everything → Markdown, chunk by heading, hash-based incremental index</td><td>Second run: 0 embeddings in ~3 s; one edit → one chunk</td><td>0002</td></tr>
+      <tr><td>qwen3-embedding:4b at 1024 dims, with the query instruction</td><td>Hit@1 71% → 87%; without the instruction 77%</td><td>0003</td></tr>
+      <tr><td>Dense search as default, hybrid kept as an option</td><td>Every keyword weight lowered Hit@1 (0.1: 84%, 0.5: 77%)</td><td>0003</td></tr>
+      <tr><td><b>No reranker</b> (planned, then removed)</td><td>+1 point over hybrid candidates at ~120× latency, still below dense alone; multilingual model harmful; saturated scores</td><td>0003</td></tr>
+      <tr><td>Per-model off-topic threshold (0.40 / 0.28)</td><td>Lowest answerable similarity 0.448 (4B) vs 0.303 (0.6B); CI caught the difference</td><td>0003</td></tr>
+      <tr><td>One structured understand call + code guards</td><td>Routed 91% → 95%; tool routing 20–40% → 100%</td><td>0004</td></tr>
+      <tr><td>Local gemma3:4b default; Groq optional; retry + fallback chain</td><td>No quota locally; free tier 200k tokens/model/day; never an error page</td><td>0004</td></tr>
+      <tr><td>Rules-first guardrails, optional classifier, precise output scrubbing</td><td>0 of 178 legitimate questions blocked; injection 6/6; hotline bug fixed</td><td>0005</td></tr>
+      <tr><td>Prometheus + Grafana + Phoenix, no personal data in traces</td><td>Counters reconcile; 0 personal data in 172 spans</td><td>0006</td></tr>
+      <tr><td>Containers, one origin, Cloudflare quick tunnel</td><td>Hugging Face Docker Spaces now paid; no card-less API host fits</td><td>0007</td></tr>
+    </tbody>
+  </table>
+  <div class="box asked"><div class="label">If you are asked</div><p>"What decision are you proudest of?" — A strong answer is a reversal: "I planned a cross-encoder reranker because that is the textbook production design, measured it on 146 questions, and removed it. It added one point at 120 times the latency and hurt German questions. The decision record keeps the numbers, so anyone can re-run the comparison when the models change."</p></div>
+
+  <h2><span class="num">25</span>Limitations, honestly</h2>
+  <table>
+    <thead><tr><th>Limitation</th><th>Why</th><th>What would fix it</th></tr></thead>
+    <tbody>
+      <tr><td>Row confusion in tables and lists; wrong citation numbers</td><td>A 4B chat model reading dense tables</td><td>A larger chat model (gpt-oss-120b is one setting away; the nightly run measures it)</td></tr>
+      <tr><td>Multi-part questions (multi_doc 0% correct)</td><td>The small model refuses the whole question when one part is missing</td><td>A larger model, or splitting questions into parts before retrieval</td></tr>
+      <tr><td>Public GOV.UK pages: Hit@1 62%</td><td>Long guides compete with each other</td><td>Smaller sections for long pages, or a stronger reranker on a GPU</td></tr>
+      <tr><td>Cross-lingual questions: Hit@1 75%</td><td>An English question against a German document</td><td>Translating the query, or more cross-lingual training data for the embedder</td></tr>
+      <tr><td>PDF tables lose row alignment</td><td>pdfminer extracts text by columns</td><td>A layout-aware PDF parser</td></tr>
+      <tr><td>Latency: median 8.2 s per question during evaluation, 1.6–2.8 s with both models resident</td><td>A 6 GB laptop GPU shared by two 4B models</td><td>A GPU server, or a cloud model</td></tr>
+      <tr><td>The demo is not always on</td><td>No free, card-less host fits the API</td><td>A small paid VM or container host; the images are ready</td></tr>
+      <tr><td>Callbacks: agents see redacted transcripts</td><td>Personal data is never stored in the chat log</td><td>Contact details through a separate, access-controlled channel (a CRM)</td></tr>
+    </tbody>
+  </table>
+  <div class="box key"><div class="label">Key idea</div><p>Knowing and stating your system's weak spots, with numbers, is a production skill, not an admission of failure. Every limitation here has a measured size and a known fix.</p></div>
+</section>
+
+<section>
+  <h2><span class="num">26</span>What changed, in one table</h2>
+  <table class="versus">
+    <thead><tr><th>Concern</th><th>Prototype (Part 1)</th><th>Production (this guide)</th><th>Chapter</th></tr></thead>
+    <tbody>
+      <tr><td>Data</td><td>6 English .txt files, 30 chunks</td><td>55 docs, 3 markets, EN/DE, md/html/pdf, versions, GOV.UK; 408 chunks</td><td>1</td></tr>
+      <tr><td>Test set</td><td>44 questions</td><td>184 questions in 16 categories, with forbidden facts</td><td>2</td></tr>
+      <tr><td>Parsing</td><td>One custom text format</td><td>markitdown for every format, HTML &lt;main&gt;, PDF heading repair</td><td>3</td></tr>
+      <tr><td>Chunking</td><td>Sections + heading prefix</td><td>Same idea, any heading depth, size-bounded with overlap</td><td>4</td></tr>
+      <tr><td>Storage</td><td>Chroma + BM25 in memory</td><td>Postgres + pgvector (HNSW) + tsvector (GIN), Alembic</td><td>5</td></tr>
+      <tr><td>Updates</td><td>Rebuild; in-section edits missed</td><td>Two-level content hashes, kb_versions</td><td>6</td></tr>
+      <tr><td>Filters</td><td>None needed</td><td>Market + validity date + newest version, inside the query</td><td>7</td></tr>
+      <tr><td>Retrieval</td><td>Hybrid RRF, 0.6B embedder</td><td>Dense, 4B embedder at 1024 dims, query instruction; no reranker</td><td>8</td></tr>
+      <tr><td>Refusal</td><td>Prompt only</td><td>Per-model similarity gate + grounded prompt + validation</td><td>9, 14</td></tr>
+      <tr><td>Pipeline</td><td>condense → retrieve → generate</td><td>guard → understand → cache → retrieve → generate → validate; tools; handoff</td><td>11–14</td></tr>
+      <tr><td>Models</td><td>One local model</td><td>Config string, retries, fallback chain, graceful "unavailable"</td><td>15</td></tr>
+      <tr><td>Interface</td><td>Streamlit</td><td>FastAPI + SSE; Next.js chat and agent desk</td><td>16–19</td></tr>
+      <tr><td>Safety</td><td>A strict prompt</td><td>Redaction, injection rules + classifier, output checks</td><td>20</td></tr>
+      <tr><td>Monitoring</td><td>None</td><td>Prometheus, Grafana, Phoenix traces, JSON logs</td><td>21</td></tr>
+      <tr><td>Quality</td><td>Run by hand, keyword checks</td><td>CI gates, nightly runs, LLM judge</td><td>22</td></tr>
+      <tr><td>Deployment</td><td>Run locally</td><td>Images, Compose profiles, one origin, quick tunnel</td><td>23</td></tr>
+    </tbody>
+  </table>
+  <h3>What stayed from the prototype, and why</h3>
+  <ul>
+    <li><b>Heading-prefixed chunks</b>: still the reason a fact stays attached to its context.</li>
+    <li><b>The conversation as a transcript</b> in one message for the rewriting step: chat-turn format still makes small models answer instead of analyse.</li>
+    <li><b>Numbered passages and [n] citations</b>, now validated in code.</li>
+    <li><b>A fixed refusal sentence and temperature 0</b>: testable refusals and repeatable evaluations.</li>
+    <li><b>Deciding by measurement</b>: the working method of both guides.</li>
+  </ul>
+  <div class="box key"><div class="label">Key idea</div><p>The prototype's <i>ideas</i> survived and its <i>code</i> did not. Production is mostly what surrounds the core idea: data variety, filters, routing, safety, monitoring, tests and deployment.</p></div>
+</section>
+
+<section class="part">
+  <div class="kicker">APPENDICES</div>
+  <h1>Revision</h1>
+  <p class="lede">New terms, the commands you will actually type, likely questions with short answers, and the whole system on one page.</p>
+  <ul><li>A. Glossary of new terms</li><li>B. Command cheat-sheet</li><li>C. Questions you may be asked</li><li>The whole system on one page</li></ul>
+</section>
+
+<section class="page compact">
+  <h2><span class="num">A</span>Glossary of new terms</h2>
+  <dl class="cols">
+    <dt>ADR</dt><dd>Architecture Decision Record: a short document with the context, decision, evidence and consequences of one choice.</dd>
+    <dt>Alembic</dt><dd>Versioned database schema migrations for SQLAlchemy.</dd>
+    <dt>Bi-encoder</dt><dd>Embeds question and passage separately; compared by vector similarity. Fast, used for search.</dd>
+    <dt>Cardinality (metrics)</dt><dd>The number of distinct label combinations; must stay small.</dd>
+    <dt>Content hash</dt><dd>A fingerprint of content (SHA-256); equal hash means unchanged.</dd>
+    <dt>Cross-encoder</dt><dd>Reads question and passage together and outputs one relevance score. Precise but slow; used for reranking.</dd>
+    <dt>DISTINCT ON</dt><dd>Postgres: keep the first row per group, after sorting. Used to pick the version valid today.</dd>
+    <dt>Fallback chain</dt><dd>Alternative models tried in order when the primary fails.</dd>
+    <dt>GIN index</dt><dd>Postgres index for "which rows contain this word", used for full-text search.</dd>
+    <dt>Golden set</dt><dd>Questions with expected routes, sections and facts, used to evaluate every change.</dd>
+    <dt>Guardrail</dt><dd>A check before or after the model that blocks, redacts or replaces content.</dd>
+    <dt>HNSW</dt><dd>Graph-based approximate nearest-neighbour index; millisecond vector search.</dd>
+    <dt>Hit@k / MRR</dt><dd>Share of questions with a relevant passage in the top k / average of 1 ÷ rank of the first relevant passage.</dd>
+    <dt>JWT</dt><dd>A signed JSON token; anyone can read it, nobody can alter it without the secret.</dd>
+    <dt>LLM-as-judge</dt><dd>A (different) model grading answers against sources and expected facts.</dd>
+    <dt>Luhn check</dt><dd>Check-digit formula of payment card numbers.</dd>
+    <dt>Matryoshka embedding</dt><dd>An embedding whose prefixes are themselves good, shorter embeddings.</dd>
+    <dt>Off-topic gate</dt><dd>Refuse without a model call when no passage reaches a similarity threshold.</dd>
+    <dt>One origin</dt><dd>The browser talks to one address; the web server forwards to the API.</dd>
+    <dt>OpenTelemetry / OTLP</dt><dd>The open standard (and its protocol) for traces, metrics and logs.</dd>
+    <dt>pgvector</dt><dd>Postgres extension adding a vector type, distance operators and vector indexes.</dd>
+    <dt>Prompt injection</dt><dd>Text that tries to act as instructions to the model.</dd>
+    <dt>Quality gate</dt><dd>A CI check that fails the build if a quality metric drops below a threshold.</dd>
+    <dt>Rate limit</dt><dd>A maximum number of requests per client per time window.</dd>
+    <dt>Redaction</dt><dd>Replacing personal data with placeholders such as [email].</dd>
+    <dt>SSE</dt><dd>Server-Sent Events: a server streams named events to the browser over one HTTP response.</dd>
+    <dt>Span / trace</dt><dd>One timed step / the tree of spans for one request.</dd>
+    <dt>Structured output</dt><dd>Model output constrained to a JSON schema.</dd>
+    <dt>tsvector</dt><dd>Postgres's stemmed-word representation of a text, for full-text search.</dd>
+    <dt>Quick tunnel</dt><dd>Cloudflare: a temporary public HTTPS address for a local port, no account needed.</dd>
+  </dl>
+</section>
+
+<section class="page compact">
+  <h2><span class="num">B</span>Command cheat-sheet</h2>
+  <table>
+    <thead><tr><th>Task</th><th>Command</th></tr></thead>
+    <tbody>
+      <tr><td>Start Postgres (development)</td><td><code>docker compose up -d</code></td></tr>
+      <tr><td>Whole app in containers</td><td><code>docker compose --profile app up -d --build</code></td></tr>
+      <tr><td>Monitoring stack</td><td><code>docker compose --profile observability up -d</code></td></tr>
+      <tr><td>Install backend, migrate</td><td><code>cd backend &amp;&amp; uv sync &amp;&amp; uv run alembic upgrade head</code></td></tr>
+      <tr><td>Index (incremental / from scratch)</td><td><code>uv run car-support ingest</code> · <code>uv run car-support ingest --full</code></td></tr>
+      <tr><td>Run the API</td><td><code>uv run car-support serve</code> (add <code>--reload</code> while editing)</td></tr>
+      <tr><td>Agent token for development</td><td><code>uv run car-support agent-token you@example.com</code></td></tr>
+      <tr><td>Tests</td><td><code>uv run pytest</code> (Docker needed for integration tests)</td></tr>
+      <tr><td>Lint and types</td><td><code>uv run ruff check . &amp;&amp; uv run mypy src tests alembic eval</code></td></tr>
+      <tr><td>Retrieval evaluation (with gate)</td><td><code>uv run python eval/run.py retrieval --min-hit4 0.88 --min-mrr 0.76</code></td></tr>
+      <tr><td>Pipeline evaluation + judge, in halves</td><td><code>uv run python eval/run.py answers --part 1/2 --judge groq:qwen/qwen3.8-27b</code></td></tr>
+      <tr><td>Frontend</td><td><code>cd frontend &amp;&amp; npm install &amp;&amp; npm run dev</code></td></tr>
+      <tr><td>Frontend checks</td><td><code>npm run lint &amp;&amp; npm run typecheck &amp;&amp; npm run test:e2e</code></td></tr>
+      <tr><td>Switch to the cloud model</td><td><code>CS_CHAT_MODEL=groq:openai/gpt-oss-120b</code> in <code>backend/.env</code></td></tr>
+      <tr><td>Public demo link</td><td><code>cloudflared tunnel --url http://localhost:3000</code> (stop it with Ctrl+C when done)</td></tr>
+    </tbody>
+  </table>
+  <h3>Key settings</h3>
+  <table>
+    <thead><tr><th>Setting</th><th>Default</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>CS_CHAT_MODEL</code> / <code>CS_FALLBACK_CHAT_MODEL</code></td><td><code>ollama:gemma3:4b</code> / none</td><td>Chat model; comma-separated fallbacks</td></tr>
+      <tr><td><code>CS_EMBED_MODEL</code></td><td><code>qwen3-embedding:4b</code></td><td>Changing it re-embeds everything on the next ingest</td></tr>
+      <tr><td><code>CS_RETRIEVAL_MODE</code>, <code>CS_TOP_K</code></td><td><code>dense</code>, 4</td><td>Search mode; passages per answer</td></tr>
+      <tr><td><code>CS_RELEVANCE_THRESHOLD</code></td><td>per model</td><td>Overrides the off-topic gate</td></tr>
+      <tr><td><code>CS_QUERY_EMBEDDING_ON_CPU</code></td><td><code>true</code></td><td>Keeps the chat model resident on a small GPU</td></tr>
+      <tr><td><code>CS_PROMPT_GUARD_MODEL</code></td><td>off</td><td>Optional injection classifier on Groq</td></tr>
+      <tr><td><code>CS_TRACING_ENDPOINT</code></td><td>off</td><td>OTLP endpoint, e.g. Phoenix</td></tr>
+      <tr><td><code>CS_CHAT_RATE_LIMIT</code></td><td><code>20/minute</code></td><td>Per client address</td></tr>
+    </tbody>
+  </table>
+  <div class="box pitfall"><div class="label">Pitfall</div><p>API keys and secrets (<code>CS_GROQ_API_KEY</code>, <code>CS_AGENT_JWT_SECRET</code>, the Open Charge Map key) belong only in the git-ignored <code>backend/.env</code> and <code>frontend/.env.local</code>, or in GitHub Actions secrets. Never in code, commits, logs or screenshots.</p></div>
+</section>
+
+<section class="page">
+  <h2><span class="num">C</span>Questions you may be asked</h2>
+  <h3>How is this different from the prototype?</h3>
+  <p>The core idea is the same: retrieve heading-prefixed passages and answer only from them, with citations. Around it, production added multi-market and multi-language data with versions, one Postgres store with filters in the query, incremental indexing, a routing pipeline with live tools and handoff, guardrails, an API and web app, monitoring, CI quality gates and containers. All of it was measured on a 184-question golden set.</p>
+  <h3>How do you stop the bot from answering a UK customer with German policy?</h3>
+  <p>Retrieval filters by market inside the SQL query, so other markets' passages can never be retrieved. The prompt also names the market, and the golden set has forbidden facts that fail the evaluation if another market's number appears.</p>
+  <h3>How do you handle documents that change on a date?</h3>
+  <p>Versions share a <code>doc_id</code> and have a <code>valid_from</code>. The query keeps, per <code>doc_id</code>, the newest version valid on the query date (<code>DISTINCT ON</code>), so the new version takes over on its date by itself. Re-indexing bumps <code>kb_version</code>, which invalidates the answer cache.</p>
+  <h3>Why not hybrid search, when that is best practice?</h3>
+  <p>It was best in the prototype with a small embedder. With the 4B embedder, every keyword weight lowered Hit@1 (87% dense vs 84% at weight 0.1), and keyword-style questions already reached 92% dense. The hybrid path stays in the code as an option.</p>
+  <h3>How do you know the answers are grounded?</h3>
+  <p>In code: every answer must cite valid passage numbers, or it is replaced by a refusal. In evaluation: an LLM judge from another model family checks that every claim is supported by the cited passages, and 93% were. The remaining 7% are mostly table-row confusion by the 4B model.</p>
+  <h3>What happens with personal data?</h3>
+  <p>It is redacted before it reaches any model, log, trace or database row. The VIN is the only exception, read by code for the recall tool. Answers are scrubbed of anything the customer typed, but not of the company's own contact details.</p>
+  <h3>How would you scale it?</h3>
+  <p>The API is stateless because all state lives in Postgres, so you run more replicas behind one ingress. Move the models to a GPU server or a hosted endpoint, use managed Postgres with pgvector, and let Prometheus scrape every replica (the queries already aggregate with <code>sum</code>). The answer cache cuts repeated questions to about a third of the time.</p>
+  <h3>What would you do next with a budget?</h3>
+  <p>A larger chat model first, because the judge's findings (row confusion, wrong citation numbers) are model limits. Then a multilingual reranker on a GPU for the long public pages, a layout-aware PDF parser, an always-on host, and real customer questions from the feedback export added to the golden set.</p>
+</section>
+
+<section class="page">
+  <h1>The whole system on one page</h1>
+  <div class="lane">
+    <div class="title">KNOWLEDGE (offline)</div>
+    <div class="flow">
+      <div class="step"><b>data/ + catalog.toml</b>55 docs · 3 markets · EN/DE · md/html/pdf · versions · GOV.UK</div><div class="arrow">→</div>
+      <div class="step"><b>markitdown</b>&lt;main&gt; only; PDF headings repaired</div><div class="arrow">→</div>
+      <div class="step"><b>Heading chunks</b>Title › Section, ≤1,200 chars, 150 overlap</div><div class="arrow">→</div>
+      <div class="step"><b>Hashes</b>embed only changes; kb_version</div><div class="arrow">→</div>
+      <div class="step"><b>Postgres</b>vector(1024) HNSW · tsvector GIN · metadata</div>
+    </div>
+  </div>
+  <div class="lane">
+    <div class="title">EVERY MESSAGE (online)</div>
+    <div class="flow">
+      <div class="step"><b>Next.js</b>one origin; SSE</div><div class="arrow">→</div>
+      <div class="step"><b>FastAPI</b>rate limit · request ID · redact</div><div class="arrow">→</div>
+      <div class="step"><b>guard</b>injection rules (+ Prompt Guard)</div><div class="arrow">→</div>
+      <div class="step"><b>understand</b>1 structured call + code guards</div><div class="arrow">→</div>
+      <div class="step"><b>cache</b>question · market · language · date · kb · model</div>
+    </div>
+    <div class="flow">
+      <div class="step"><b>retrieve</b>market + date filters; dense 4B; gate 0.40</div><div class="arrow">→</div>
+      <div class="step"><b>generate</b>numbered passages; market &amp; language</div><div class="arrow">→</div>
+      <div class="step"><b>validate</b>citations · leaks · echo</div><div class="arrow">→</div>
+      <div class="step"><b>store</b>answer cached; message saved</div>
+    </div>
+    <p class="footer-note" style="margin:0">Other routes: recall (NHTSA) · chargers (Nominatim + Open Charge Map) · handoff → ticket → agent desk · off-topic · blocked. Every model call: retry → fallback chain → "unavailable, shall I connect you?"</p>
+  </div>
+  <div class="lane">
+    <div class="title">AROUND IT</div>
+    <div class="flow">
+      <div class="step"><b>Observe</b>/metrics → Prometheus → Grafana; OTLP → Phoenix; JSON logs</div>
+      <div class="step"><b>Evaluate</b>184 golden Qs; retrieval gate in CI; nightly judge</div>
+      <div class="step"><b>Secure</b>agent sign-in + allowlist + 5-min JWT; audits &amp; Trivy</div>
+      <div class="step"><b>Ship</b>2 images · Compose profiles · quick tunnel</div>
+    </div>
+  </div>
+  <div class="stats">
+    <div><div class="big">97%</div><div class="small">Hit@4 (Hit@1 87%, MRR 0.917)</div></div>
+    <div><div class="big">96%</div><div class="small">routed correctly, 86% fully correct</div></div>
+    <div><div class="big">93%</div><div class="small">judged faithful to cited sources</div></div>
+    <div><div class="big">0 / 178</div><div class="small">legitimate questions blocked by guardrails</div></div>
+  </div>
+  <p class="footer-note">Car Support RAG, Part 2 · car-support-assistant · every number from backend/eval/results/ and docs/adr/ · built entirely on free software.</p>
+</section>

@@ -186,6 +186,7 @@ Each phase ends with passing tests, the eval updated where relevant, and its own
 - It explains **what changed from the prototype to production, how, and why**, chapter by chapter: data and catalog, conversion and chunking, Postgres + pgvector, incremental indexing, hybrid SQL search with filters and versions, embedding-model and reranker choices, the relevance gate, the LangGraph pipeline with router and tools, guardrails, the API, the frontend, observability, LLM-as-judge and CI, deployment and the zero-cost setup.
 - Every number comes from this repo's evals, ADRs and live runs (the ADRs and `backend/eval/results/` are the running log it draws on). It covers new concepts from scratch (e.g. Matryoshka embeddings, cross-encoders, SSE streaming, tracing, prompt injection) and ends with a glossary, a command cheat-sheet and likely interview questions with answers.
 - Delivered as HTML source in `docs/guide/` and rendered to PDF with headless Edge. A copy goes next to the original guide as `D:\Projects\BMW_RAG_Manideep\RAG_Production_Guide.pdf`.
+- **Outcome:** [`docs/guide/RAG_Production_Guide.pdf`](guide/RAG_Production_Guide.pdf), 48 pages in 8 parts and 26 chapters plus appendices. It is rebuilt with `python docs/guide/build.py`.
 
 ## Verification (end-to-end)
 1. `make test` (unit + integration on real Postgres) and the frontend lint/build/Playwright tests are green; CI passes on every PR.

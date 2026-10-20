@@ -1,0 +1,190 @@
+<section class="part">
+  <div class="kicker">PART A</div>
+  <h1>Data</h1>
+  <p class="lede">A retrieval system can only be as good as what it retrieves from, and an evaluation can only prove what its questions test. Part A rebuilds both.</p>
+  <ul><li>1. From six text files to a knowledge base</li><li>2. The golden set: 184 questions that judge every change</li></ul>
+</section>
+
+<section>
+  <h2><span class="num">1</span>From six text files to a knowledge base</h2>
+  <p>The prototype's knowledge base was six English text files in one custom format, about one brand in one country. Every fact was true everywhere, so nothing could be retrieved "for the wrong customer". Real support content is different. The same company says different things in different countries, documents come as web pages and PDFs, some are in German, and policies change on a date. The production corpus was built to have all of these properties <i>on purpose</i>, so that the system is tested against them.</p>
+
+  <h3>What the corpus contains</h3>
+  <table>
+    <thead><tr><th>Part</th><th>What</th><th>Why it is there</th></tr></thead>
+    <tbody>
+      <tr><td>Fictional brand "Northwind Motors"</td><td>13 support topics (warranty, service plans, charging, roadside assistance, …) plus an FAQ page, written separately for the UK, the US and Germany (German language)</td><td>Markets <b>deliberately disagree</b>: a 3-year/60,000-mile warranty in the UK, other terms in the US and DE, different hotlines. Retrieving the wrong market gives a confident, wrong answer.</td></tr>
+      <tr><td>Model guides and owner manuals</td><td>Four models (Aero, Vela, Ion 4, Ion X) as Markdown, HTML and multi-page PDF manuals</td><td>Real formats with real problems: navigation in HTML, lost headings and broken lines in PDFs.</td></tr>
+      <tr><td>A future version</td><td><code>charging-tariffs-2027.md</code>, same <code>doc_id</code> as the current tariffs, <code>valid_from = 2027-01-01</code></td><td>Tests that only the version valid <i>today</i> is used.</td></tr>
+      <tr><td>Real public guidance</td><td>6 GOV.UK pages (consumer rights, MOT, vehicle recalls, vehicle tax, smart charge points, driving abroad), fetched by <code>scripts/fetch_public.py</code></td><td>Real, long, brand-neutral text under an open licence (OGL v3), with attribution shown to the customer.</td></tr>
+    </tbody>
+  </table>
+  <p>Total: <b>55 documents</b>, which become <b>408 chunks</b>. The prototype had 30.</p>
+
+  <div class="box key"><div class="label">Key idea</div><p>A test corpus should contain the difficulties production will have. If every document agrees, a retrieval system that ignores the customer's market looks perfect.</p></div>
+
+  <h3>Metadata: the path says most of it</h3>
+  <p>Every file lives at <code>&lt;source_type&gt;/&lt;market&gt;/&lt;language&gt;/&lt;file&gt;</code>, so <code>brand/de/de/warranty.md</code> already says: brand content, German market, German language. A small catalog file holds only what a path cannot say: versions, which car model a document is about, source URLs and licences.</p>
+  <div class="file">data/catalog.toml</div>
+<pre>[defaults.public]
+licence = "OGL-3.0"
+attribution = "Contains public sector information licensed under the Open Government Licence v3.0."
+
+# Two files share one doc_id; retrieval keeps the version valid on the query date.
+[docs."brand/uk/en/charging-tariffs-2027.md"]
+doc_id = "brand/uk/en/charging-tariffs"
+valid_from = 2027-01-01</pre>
+
+  <div class="box analogy"><div class="label">Analogy</div><p>A library shelves books by section and language, so the shelf already tells you most things about a book. The index card holds only the extras: the edition and who may copy it.</p></div>
+
+  <div class="box project"><div class="label">In this project</div><p><code>data/brand/</code>, <code>data/public/</code>, <code>data/catalog.toml</code>, and the loader <code>ingest/catalog.py</code>. The owner-manual PDFs are rendered from HTML sources by <code>scripts/build_manuals.sh</code> (headless Edge), so they can be rebuilt and diffed.</p></div>
+
+  <div class="box pitfall"><div class="label">Pitfall</div><p>Public data has licences. GOV.UK content is free to reuse under the Open Government Licence, but only <i>with attribution</i>. The licence and attribution therefore travel with every chunk, and the web app shows them next to a cited source.</p></div>
+</section>
+
+<section>
+  <h2><span class="num">2</span>The golden set: 184 questions that judge every change</h2>
+  <p>The prototype had 44 test questions and checked answers for keywords. That was enough to compare a few retrieval modes. It cannot answer production questions such as "does the German customer get the German warranty?" or "does a prompt-injection attempt get through?". The new golden set has 184 questions in 16 categories, and each category exists to catch one specific failure.</p>
+  <table>
+    <thead><tr><th>Category</th><th class="n">Qs</th><th>What it catches</th></tr></thead>
+    <tbody>
+      <tr><td>natural</td><td class="n">60</td><td>Everyday questions in a customer's own words</td></tr>
+      <tr><td>german</td><td class="n">20</td><td>German questions against German documents</td></tr>
+      <tr><td>model</td><td class="n">18</td><td>Facts about one car model, not another</td></tr>
+      <tr><td>keyword</td><td class="n">12</td><td>Terse queries: "SOS button", "V2L", "LL-26 0W-20"</td></tr>
+      <tr><td>followup</td><td class="n">10</td><td>"And for the Ion X?": needs the conversation</td></tr>
+      <tr><td>out_of_scope</td><td class="n">10</td><td>Must be refused, not invented</td></tr>
+      <tr><td>market</td><td class="n">9</td><td>The same question with a different correct answer per market</td></tr>
+      <tr><td>cross_lingual · public</td><td class="n">8 · 8</td><td>English question, German document · GOV.UK pages</td></tr>
+      <tr><td>injection · pii</td><td class="n">6 · 4</td><td>Attacks; messages containing personal data</td></tr>
+      <tr><td>tool_recall · tool_charger · handoff</td><td class="n">5 · 5 · 3</td><td>Must take the right route, not answer from documents</td></tr>
+      <tr><td>version · multi_doc</td><td class="n">3 · 3</td><td>Today's version wins · facts from two documents</td></tr>
+    </tbody>
+  </table>
+  <p>Every question records the <b>route</b> it should take, the <b>relevant</b> sections (for retrieval metrics), the <b>facts</b> a correct answer must contain, and <b>forbidden</b> facts that would prove the wrong market or version was used:</p>
+<pre>{"id": "uk-001", "category": "natural", "market": "uk", "question": "How long is the warranty on a new car?",
+ "route": "kb", "relevant": ["brand/uk/en/warranty#New Vehicle Warranty"],
+ "facts": ["3 years", "60,000 miles"], "forbidden": ["50,000 miles", "100.000 km"]}</pre>
+
+  <div class="box key"><div class="label">Key idea</div><p>"Forbidden facts" turn a vague worry ("might it mix up markets?") into a test that fails. Here, the US mileage or the German kilometres in a UK answer would fail it.</p></div>
+
+  <div class="box project"><div class="label">In this project</div><p><code>backend/eval/golden.jsonl</code>. A unit test (<code>tests/test_corpus.py</code>) checks that every relevant section exists and every expected fact really appears in the documents. Without that test, a typo in the golden set looks like a model error.</p></div>
+
+  <div class="box pitfall"><div class="label">Pitfall</div><p>Keyword grading needs normalisation. "100.000 km" (German), "100 000 km" and "100,000 km" are the same fact, and some models write numbers with narrow no-break spaces. The grader normalises number formats, Unicode spaces and hyphens, and the golden set allows alternatives such as <code>"15p|15 pence"</code>.</p></div>
+
+  <div class="box asked"><div class="label">If you are asked</div><p>"How did you know your changes helped?" — "Every change ran against a golden set of 184 questions in 16 categories, each category targeting one failure: wrong market, wrong version, wrong route, injection, personal data. Answers are graded for required and forbidden facts, and later also by an LLM judge."</p></div>
+</section>
+
+<section class="part">
+  <div class="kicker">PART B</div>
+  <h1>Ingestion and storage</h1>
+  <p class="lede">How documents in any format become searchable chunks in one database, and why a second run does nothing.</p>
+  <ul><li>3. One converter for every format</li><li>4. Chunking by heading, now for any document</li><li>5. One database for everything: Postgres + pgvector</li><li>6. Incremental indexing with content hashes</li></ul>
+</section>
+
+<section>
+  <h2><span class="num">3</span>One converter for every format</h2>
+  <p>The prototype parsed one home-made text format. Production documents are Markdown, HTML and PDF, and more formats will follow. Instead of one chunker per format, every file is first converted to <b>Markdown</b> with Microsoft's open-source <code>markitdown</code>. Everything after that step only has to understand Markdown headings.</p>
+  <div class="flow">
+    <div class="step"><b>.md</b>used as is</div>
+    <div class="step"><b>.html</b>only &lt;main&gt; kept; links reduced to their text</div>
+    <div class="step"><b>.pdf</b>text extracted; headings and lines repaired</div>
+    <div class="arrow">→</div>
+    <div class="step"><b>Markdown</b>one format for the chunker</div>
+  </div>
+  <h3>The two repairs that mattered</h3>
+  <ul>
+    <li><b>HTML noise.</b> Converting a whole web page also converts its menu, cookie banner and footer, and those words then match every query. Only the <code>&lt;main&gt;</code> element is converted when the page has one.</li>
+    <li><b>PDF headings.</b> A PDF stores positioned text, not structure, so "3.1 AC charging" arrives as an ordinary line and the section information is lost. Numbered heading lines are promoted back to Markdown headings, and lines that the page layout wrapped are joined again.</li>
+  </ul>
+  <div class="box analogy"><div class="label">Analogy</div><p>A translator who turns every incoming language into English, so the rest of the office only needs to read English.</p></div>
+  <div class="box project"><div class="label">In this project</div><p><code>ingest/convert.py</code>, decided in ADR 0002.</p></div>
+  <div class="box pitfall"><div class="label">Pitfall</div><p>Tables inside PDFs come out column by column (a limitation of pdfminer, which markitdown uses). Their facts stay in the right section but lose row alignment. Tables in HTML and Markdown are preserved. This is one reason the model sometimes reads a value from the wrong row (chapter 22).</p></div>
+
+  <h2><span class="num">4</span>Chunking by heading, now for any document</h2>
+  <p>The prototype's best idea is kept: one chunk per section, and every chunk starts with its <b>heading path</b>, so "8 years" stays attached to <i>which</i> warranty it describes. What changed is how it works. It now reads Markdown headings at any depth, and long sections are split safely.</p>
+<pre>Warranty Coverage (United Kingdom) › High-Voltage Battery Warranty (Ion and Vela models)
+- Duration: 8 years or 100,000 miles, whichever comes first.
+- Northwind guarantees that the battery keeps at least 70% of its original usable capacity …</pre>
+  <ul>
+    <li>A section longer than <b>1,200 characters</b> is split on paragraph, then line, then sentence boundaries, with <b>150 characters of overlap</b>, so a sentence cut in half still appears whole in one piece.</li>
+    <li>Every piece keeps the full heading prefix.</li>
+    <li>A heading with no text of its own (immediately followed by a sub-heading) produces no empty chunk.</li>
+  </ul>
+  <div class="file">backend/src/car_support/ingest/chunk.py (core loop)</div>
+<pre>for line in markdown.splitlines():
+    if m := _HEADING.match(line):
+        level, heading = len(m[1]), m[2]
+        stack = [(lvl, h) for lvl, h in stack if lvl &lt; level] + [(level, heading)]
+        sections.append(((title, *(h for _, h in stack)), []))
+    else:
+        sections[-1][1].append(line)</pre>
+  <div class="box key"><div class="label">Key idea</div><p>The heading stack is a small but precise idea. A new heading closes every open heading at its level or deeper, so a "### Claims" heading under "## Battery Warranty" gets the path Title › Battery Warranty › Claims, and the next "## …" heading starts a fresh path.</p></div>
+</section>
+
+<section>
+  <h2><span class="num">5</span>One database for everything: Postgres + pgvector</h2>
+  <p>The prototype used two stores: Chroma for vectors, and a BM25 index rebuilt in the app's memory. That breaks in production:</p>
+  <ul>
+    <li>Run three copies of the API for load and you have three keyword indexes to keep in sync.</li>
+    <li>Conversations, tickets and feedback need a real transactional database anyway.</li>
+    <li>Filters (market, date) must apply to both searches in the same way.</li>
+  </ul>
+  <p>The answer is <b>one PostgreSQL database with the pgvector extension</b>. Vectors, keyword search, metadata filters and all application data live in one place and can be combined in one SQL query.</p>
+  <table>
+    <thead><tr><th>Column / table</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>chunks.embedding vector(1024)</code> + HNSW index</td><td>Fast approximate nearest-neighbour search by cosine distance</td></tr>
+      <tr><td><code>chunks.tsv</code> (generated tsvector) + GIN index</td><td>Keyword search, stemmed with the chunk's own language (English or German)</td></tr>
+      <tr><td><code>documents</code></td><td>Market, language, source type, validity date, licence, URL: the filter fields</td></tr>
+      <tr><td><code>kb_versions</code></td><td>One row per index change; part of the answer-cache key</td></tr>
+      <tr><td><code>conversations, messages, feedback, tickets, answer_cache</code></td><td>The product's own data (Part E)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>New concept: HNSW</h3>
+  <p>Comparing a question with every stored vector is exact but gets slow as the number of vectors grows. <b>HNSW</b> (Hierarchical Navigable Small World) builds a layered graph in which each vector links to its near neighbours. A search starts at a coarse top layer, jumps towards the question, and refines in the lower layers. It may miss the true best match in rare cases (it is <i>approximate</i>), in exchange for searching in milliseconds. Here a search takes about 11 ms.</p>
+  <div class="box analogy"><div class="label">Analogy</div><p>Finding a street: first the motorway to the right city, then main roads to the district, then side streets. You never drive down every street in the country.</p></div>
+
+  <h3>New concept: a generated tsvector</h3>
+  <p>Postgres full-text search stores a <b>tsvector</b>: the text reduced to stemmed words ("charging", "charged" → "charg"). A <i>generated</i> column is computed by the database itself whenever the row changes, so it can never be out of date. Its stemming rules follow the chunk's language, so German compound words and endings are handled properly. BM25 in the prototype treated German text like English.</p>
+
+  <div class="box project"><div class="label">In this project</div><p><code>db/models.py</code> and the Alembic migrations in <code>backend/alembic/versions/</code> (0001–0003). Alembic records every schema change as a versioned script, so every environment, from a laptop to CI to a container, reaches the same schema with <code>alembic upgrade head</code>.</p></div>
+  <div class="box asked"><div class="label">If you are asked</div><p>"Why not a dedicated vector database?" — "At this size, Postgres with pgvector does dense search, keyword search and metadata filtering in one query, keeps the API stateless, and also stores the app's own data. One system to back up, secure and monitor. A dedicated vector store would make sense at many millions of vectors or for features Postgres lacks."</p></div>
+  <div class="box pitfall"><div class="label">Pitfall</div><p>The vector size is part of the schema (<code>vector(1024)</code>). Changing to an embedding model with a different dimension needs a migration, which is why the bigger embedding model in chapter 8 was asked to produce 1024-dimensional vectors.</p></div>
+</section>
+
+<section>
+  <h2><span class="num">6</span>Incremental indexing with content hashes</h2>
+  <p>The prototype rebuilt everything on each run, and its change detection only noticed added or removed sections, not an edit inside one. Production content changes daily, and embedding 408 chunks takes minutes. The new indexer does only the work that is needed.</p>
+  <h3>New concept: a content hash</h3>
+  <p>A hash function (SHA-256 here) turns any text into a short fixed-length fingerprint. The same text always gives the same fingerprint, and changing a single character gives a completely different one. Comparing fingerprints is therefore a cheap, reliable way to ask "has this changed?".</p>
+  <div class="lane">
+    <div class="title">TWO LEVELS OF HASHING</div>
+    <div class="flow">
+      <div class="step"><b>Document hash</b>text + metadata + chunk settings + embedding model. Unchanged → skip the whole file.</div><div class="arrow">→</div>
+      <div class="step"><b>Chunk hash</b>model + path + chunk text. In a changed file, only new chunk hashes are embedded.</div><div class="arrow">→</div>
+      <div class="step"><b>Clean up</b>vanished chunks and deleted files are removed; a new kb_version is recorded.</div>
+    </div>
+  </div>
+  <div class="file">backend/src/car_support/ingest/index.py</div>
+<pre>doc_hash = _sha(markdown, json.dumps(asdict(meta), default=str), chunking, settings.embed_model)
+if record is not None and record.content_hash == doc_hash:
+    continue                                      # unchanged document: nothing to do
+...
+chunk_id = _sha(settings.embed_model, meta.path, chunk.text)
+new_ids = [i for i in wanted if i not in have]   # only these are embedded
+vectors = embed([wanted[i][1] for i in new_ids]) if new_ids else []</pre>
+  <table>
+    <thead><tr><th>Situation</th><th>Work done</th></tr></thead>
+    <tbody>
+      <tr><td>Full ingest of 55 documents</td><td>408 chunks embedded, about 2.5 minutes</td></tr>
+      <tr><td>Second run, nothing changed</td><td>0 chunks embedded, about 3 seconds</td></tr>
+      <tr><td>One sentence edited in one section</td><td>Exactly 1 chunk re-embedded (an integration test pins this)</td></tr>
+      <tr><td>Embedding model changed</td><td>Everything re-embedded automatically: the model name is part of every hash</td></tr>
+    </tbody>
+  </table>
+  <div class="box key"><div class="label">Key idea</div><p>Put everything that can change the result into the hash: text, metadata, chunk settings and the model. Then "unchanged hash" really means "nothing to do", and you never need a manual "please rebuild" step.</p></div>
+  <div class="box analogy"><div class="label">Analogy</div><p>A printer who reprints only the pages that changed in a new edition. Every page carries a fingerprint, and a matching fingerprint means the old print is still correct.</p></div>
+  <div class="box project"><div class="label">In this project</div><p><code>car-support ingest</code> (incremental) and <code>car-support ingest --full</code>. Each run that changes something writes a <code>kb_versions</code> row. The answer cache includes that version in its key, so new content can never be hidden behind an old cached answer.</p></div>
+</section>
