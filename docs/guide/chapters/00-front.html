@@ -1,0 +1,117 @@
+<section class="cover">
+  <div class="kicker">LEARNING GUIDE, PART 2 · CAR-SUPPORT-ASSISTANT</div>
+  <h1>Car Support RAG<br>From Prototype to Production</h1>
+  <p class="lede">What changed when the local prototype became a production system, how each change was made, and why: with the numbers that decided every choice. Written as the companion to "Every Concept Explained".</p>
+  <div class="chips">
+    <span>Multi-market data</span><span>Incremental indexing</span><span>Postgres + pgvector</span><span>Filters &amp; versions</span>
+    <span>Evaluation-driven retrieval</span><span>LangGraph with tools</span><span>Deterministic guards</span><span>Guardrails</span>
+    <span>FastAPI &amp; SSE</span><span>Next.js</span><span>Metrics &amp; traces</span><span>LLM-as-judge</span><span>CI gates</span><span>Containers</span>
+  </div>
+  <div class="foot">
+    Project: <b>car-support-assistant</b> (github.com/Joshi595/car-support-assistant), built in 12 phases on top of the case-study prototype <b>car_support_rag</b>.<br>
+    Every number comes from the project's own evaluation reports, decision records (ADRs) or a live run (October 2026). Everything used is free.
+  </div>
+</section>
+
+<section class="page toc">
+  <h1>Contents</h1>
+  <ol>
+    <li class="part-title">How to use this guide · The production system in one page</li>
+    <li class="part-title">Part A: Data</li>
+    <li class="ch">1. From six text files to a knowledge base</li>
+    <li class="ch">2. The golden set: 184 questions that judge every change</li>
+    <li class="part-title">Part B: Ingestion and storage</li>
+    <li class="ch">3. One converter for every format</li>
+    <li class="ch">4. Chunking by heading, now for any document</li>
+    <li class="ch">5. One database for everything: Postgres + pgvector</li>
+    <li class="ch">6. Incremental indexing with content hashes</li>
+    <li class="part-title">Part C: Retrieval: what the evaluation overturned</li>
+    <li class="ch">7. Filters and versions inside one SQL query</li>
+    <li class="ch">8. A bigger embedding model, and why hybrid search and reranking lost</li>
+    <li class="ch">9. The off-topic gate, and what a similarity score cannot know</li>
+    <li class="ch">10. Speed on a laptop: two surprising fixes</li>
+    <li class="part-title">Part D: The pipeline</li>
+    <li class="ch">11. The new graph: guard, understand, route</li>
+    <li class="ch">12. Deterministic guards around a small model</li>
+    <li class="ch">13. Live tools: recalls and chargers from open data</li>
+    <li class="ch">14. Grounded generation and validation</li>
+    <li class="ch">15. Models: local first, free cloud optional, never crash</li>
+    <li class="part-title">Part E: API, product and frontend</li>
+    <li class="ch">16. The API and streaming answers</li>
+    <li class="ch">17. Conversations, feedback, handoff and the answer cache</li>
+    <li class="ch">18. Agents, sign-in and tokens</li>
+    <li class="ch">19. The web app</li>
+    <li class="part-title">Part F: Safety</li>
+    <li class="ch">20. Guardrails: personal data, prompt injection, output checks</li>
+    <li class="part-title">Part G: Operations</li>
+    <li class="ch">21. Observability: metrics, dashboards and traces</li>
+    <li class="ch">22. Evaluation and CI: from keyword checks to an LLM judge</li>
+    <li class="ch">23. Deployment: containers, one origin, a free public link</li>
+    <li class="part-title">Part H: Decisions and limits</li>
+    <li class="ch">24. Every decision and its evidence</li>
+    <li class="ch">25. Limitations, honestly</li>
+    <li class="ch">26. What changed, in one table</li>
+    <li class="part-title">Appendices</li>
+    <li class="ch">A. Glossary of new terms · B. Command cheat-sheet · C. Questions you may be asked · The whole system on one page</li>
+  </ol>
+</section>
+
+<section class="page">
+  <h1>How to use this guide</h1>
+  <p>Part 1 explained every concept of the prototype from zero: what an LLM is, RAG, chunking, embeddings, vector stores, BM25, Reciprocal Rank Fusion, prompting, follow-up questions, citations, LangGraph and evaluation. This guide assumes you know those ideas. It explains only what is <b>new or different</b> in the production system, in the same way: plain language first, then the precise idea, then the exact place in the code.</p>
+  <p>The same five boxes appear again:</p>
+  <div class="box key"><div class="label">Key idea</div><p>The one sentence to remember from a section.</p></div>
+  <div class="box analogy"><div class="label">Analogy</div><p>An everyday comparison that makes an abstract idea concrete.</p></div>
+  <div class="box project"><div class="label">In this project</div><p>Where the idea lives in <code>car-support-assistant</code>, with file names and code.</p></div>
+  <div class="box asked"><div class="label">If you are asked</div><p>How to explain it in an interview, in two or three sentences.</p></div>
+  <div class="box pitfall"><div class="label">Pitfall</div><p>A mistake that was actually made or measured along the way, or a limitation to know.</p></div>
+  <p><b>One habit runs through the whole guide:</b> every important choice was <i>measured</i> before it was kept. Several plans did not survive the measurement: the reranker, hybrid search as the default, a single relevance threshold and the Hugging Face demo. Where that happened, the guide shows the plan, the number and the change. Those reversals are the most valuable part to understand and to talk about.</p>
+  <p><b>Reading order.</b> Read the one-page overview next, then Parts A to D in order (each builds on the previous one). Parts E to G can be read in any order. Part H and the appendices are for revision.</p>
+  <h3>The results in four numbers</h3>
+  <div class="stats">
+    <div><div class="big">96%</div><div class="small">of 184 questions took the right path (answer, refuse, tool, handoff)</div></div>
+    <div><div class="big">93%</div><div class="small">of answers judged faithful to their sources by an independent LLM</div></div>
+    <div><div class="big">97%</div><div class="small">retrieval Hit@4 with the 4B embedding model</div></div>
+    <div><div class="big">€0</div><div class="small">cost: every tool, model and service is free</div></div>
+  </div>
+</section>
+
+<section class="page compact">
+  <h1>The production system in one page</h1>
+  <p><b>The goal.</b> Turn the case-study prototype (six text files, a local chatbot, a 44-question evaluation) into a system a car maker could run: several markets and languages, real document formats, live data, human handoff, an API, a web app, safety, monitoring, automatic quality checks and a deployment, all on free software.</p>
+  <div class="lane">
+    <div class="title">INGESTION: offline, incremental (car-support ingest)</div>
+    <div class="flow">
+      <div class="step"><b>55 documents</b>md · html · pdf<br>DE · UK · US · global</div><div class="arrow">→</div>
+      <div class="step"><b>Convert</b>everything to Markdown (markitdown)</div><div class="arrow">→</div>
+      <div class="step"><b>Chunk by heading</b>Title › Section prefix → 408 chunks</div><div class="arrow">→</div>
+      <div class="step"><b>Hash &amp; embed changes only</b>qwen3-embedding:4b</div><div class="arrow">→</div>
+      <div class="step"><b>Postgres</b>pgvector + full-text + metadata</div>
+    </div>
+  </div>
+  <div class="lane">
+    <div class="title">ONLINE: every customer message (FastAPI → LangGraph)</div>
+    <div class="flow">
+      <div class="step"><b>Redact</b>personal data out</div><div class="arrow">→</div>
+      <div class="step"><b>guard</b>injection rules</div><div class="arrow">→</div>
+      <div class="step"><b>understand</b>intent, standalone question, tool args</div><div class="arrow">→</div>
+      <div class="step"><b>cache → retrieve</b>market &amp; version filters</div><div class="arrow">→</div>
+      <div class="step"><b>generate → validate</b>citations checked</div>
+    </div>
+    <p class="footer-note" style="margin:0">Other routes from <b>understand</b>: recall lookup (NHTSA) · charger search (Open Charge Map) · handoff to a person · off-topic reply.</p>
+  </div>
+  <table class="versus">
+    <thead><tr><th></th><th>Prototype (Part 1)</th><th>Production (this guide)</th></tr></thead>
+    <tbody>
+      <tr><td>Knowledge base</td><td>6 English .txt files, 30 chunks</td><td>55 documents, 3 markets, 2 languages, 3 formats, versions, public GOV.UK pages; 408 chunks</td></tr>
+      <tr><td>Storage</td><td>Chroma + BM25 in memory</td><td>Postgres + pgvector, one store for everything</td></tr>
+      <tr><td>Index updates</td><td>Full rebuild; edits inside a section missed</td><td>Incremental by content hash; a second run embeds nothing</td></tr>
+      <tr><td>Retrieval</td><td>Hybrid, BM25 weight 0.5</td><td>Dense with a 4B embedding model, market and date filters (Hit@4 97%)</td></tr>
+      <tr><td>Pipeline</td><td>condense → retrieve → generate</td><td>guard → understand → cache → retrieve → generate → validate, plus tools and handoff</td></tr>
+      <tr><td>Interface</td><td>Streamlit</td><td>FastAPI with streaming + Next.js chat and agent desk</td></tr>
+      <tr><td>Safety</td><td>A strict prompt</td><td>Redaction, injection guard, citation and leak checks</td></tr>
+      <tr><td>Quality</td><td>44 questions, keyword checks, run by hand</td><td>184 questions, keyword checks + LLM judge, gates in CI, nightly runs</td></tr>
+      <tr><td>Operations</td><td>None</td><td>Metrics, Grafana dashboard, traces, containers, a public demo link</td></tr>
+    </tbody>
+  </table>
+</section>

@@ -1,0 +1,141 @@
+<section class="part">
+  <div class="kicker">PART D</div>
+  <h1>The pipeline</h1>
+  <p class="lede">The prototype's graph had one road: condense, retrieve, generate. The production graph has eight destinations, and the most important design rule is about who decides what: the model or the code.</p>
+  <ul><li>11. The new graph: guard, understand, route</li><li>12. Deterministic guards around a small model</li><li>13. Live tools: recalls and chargers from open data</li><li>14. Grounded generation and validation</li><li>15. Models: local first, free cloud optional, never crash</li></ul>
+</section>
+
+<section>
+  <h2><span class="num">11</span>The new graph: guard, understand, route</h2>
+  <p>Customers do not only ask questions the documents answer. They ask "is there a recall on my car?" (live data), "where can I charge near Munich?" (live data), "let me talk to a person" (handoff), or "who won the match?" (off-topic). Some send attacks. The graph now routes each message to the right destination.</p>
+<pre class="diagram">guard ─┬─ injection ─► blocked
+       └─ understand ─┬─ question ───────► cache ─┬─ hit ─► cached answer
+                      │                           └─ miss ─► retrieve ─┬─ relevant ─► generate ─► validate ─► store
+                      │                                                └─ off-topic ─► refuse
+                      ├─ recall_lookup ──► recall (NHTSA)
+                      ├─ charger_search ─► chargers (OpenStreetMap + Open Charge Map)
+                      ├─ human_agent ────► handoff (ticket)
+                      └─ off_topic ──────► off_topic</pre>
+  <h3>Why one "understand" call instead of condense + router</h3>
+  <p>The usual design has two model calls: one rewrites follow-ups into standalone questions (the prototype's condense step), and one router picks the path. Each call to a 4B model costs about a second. Both need the same input, the conversation and the latest message, so one <b>structured</b> call returns everything at once:</p>
+  <div class="file">backend/src/car_support/pipeline/prompts.py</div>
+<pre>class Understanding(BaseModel):
+    intent: Intent                     # question, recall_lookup, charger_search, human_agent, off_topic
+    standalone_question: str           # follow-ups resolved from the transcript
+    vin: str | None = Field(description="17-character vehicle identification number, if given")
+    make: str | None                   # for a recall lookup without a VIN
+    model: str | None
+    year: int | None
+    location: str | None               # for a charger search</pre>
+
+  <h3>New concept: structured output with an enforced schema</h3>
+  <p>Asking a model "reply in JSON" is a request it can ignore. With <b>schema-enforced structured output</b>, the model server (Ollama, or Groq) restricts generation so that only tokens that keep the output valid against the JSON schema can be produced. The result always parses into the Pydantic class, with no fragile text parsing.</p>
+  <div class="box analogy"><div class="label">Analogy</div><p>A paper form with labelled boxes instead of a blank sheet. The person filling it in can still write something wrong in a box, but cannot forget that the box exists or invent a new one.</p></div>
+
+  <div class="box key"><div class="label">Key idea</div><p>Only two nodes call a chat model: <code>understand</code> and <code>generate</code>. Everything else is plain code, which is fast, testable and predictable.</p></div>
+  <div class="box project"><div class="label">In this project</div><p><code>pipeline/graph.py</code> builds the graph with LangGraph's <code>StateGraph</code>. Every node is wrapped by <code>timed(name)</code>, which records its latency for the dashboard (chapter 21). The conversation is still passed as a transcript inside one message, not as chat turns, which was a measured lesson from the prototype.</p></div>
+</section>
+
+<section>
+  <h2><span class="num">12</span>Deterministic guards around a small model</h2>
+  <p>The first version of the pipeline let the model decide everything. The evaluation showed exactly where a 4B model fails, and each failure was fixed by moving that decision into code:</p>
+  <table>
+    <thead><tr><th>Observed failure (gemma3:4b)</th><th>Fix in code</th><th>Effect</th></tr></thead>
+    <tbody>
+      <tr><td>Optional tool fields were left out of the JSON, so recall lookups asked for a VIN the customer had already given</td><td>Fields made <b>required but nullable</b> (<code>str | None</code> with no default): the model must write each one, even if only as <code>null</code></td><td>Recall routing 20% → 100%</td></tr>
+      <tr><td>Asked to report the language, the model labelled English questions German after seeing a German example</td><td>Language detected by a word-list heuristic, not the model</td><td>German category 95%</td></tr>
+      <tr><td>VINs copied with a character missing or changed</td><td>A VIN must match the 17-character VIN pattern; otherwise it is read from the message with a regex</td><td>No invented VINs</td></tr>
+      <tr><td>"Is there a recall?" with no car named sent to the recall tool</td><td>A tool without its arguments becomes a normal question; the documents explain how recalls work</td><td>No pointless "please give details" replies</td></tr>
+      <tr><td>The structured call failed (model down, invalid output)</td><td>Rules take over: a VIN means recall, "human/agent" means handoff, otherwise a question</td><td>Never an error page</td></tr>
+    </tbody>
+  </table>
+  <div class="file">backend/src/car_support/pipeline/graph.py</div>
+<pre>def _check_tool_arguments(u: Understanding, question: str) -&gt; Understanding:
+    vin = u.vin if u.vin and _VIN.fullmatch(u.vin.upper()) else None
+    if not vin and (found := _VIN.search(question.upper())):
+        vin = found[0]  # a VIN is unambiguous: do not rely on the model to copy it
+    u = u.model_copy(update={"vin": vin})
+    vehicle_known = bool(vin or (u.make and u.model and u.year))
+    if (u.intent == "recall_lookup" and not vehicle_known) or (
+        u.intent == "charger_search" and not u.location
+    ):
+        return u.model_copy(update={"intent": "question"})
+    return u</pre>
+  <p>Together these fixes raised the pipeline from 91% routed / 83% correct to <b>95% routed / 86% correct</b>, with tool routing going from 20–40% to 100%.</p>
+  <div class="box key"><div class="label">Key idea</div><p>Let the model do what only a model can (understanding free text, resolving "and for the Ion X?"). Let code do what code does perfectly (pattern matching, checking, defaults). A small model plus deterministic guards beats a small model alone.</p></div>
+  <div class="box analogy"><div class="label">Analogy</div><p>A new employee takes the customer's call, while a checklist on the desk catches the typical slips: did you write the VIN down correctly? Did you get an address before booking a technician?</p></div>
+  <div class="box pitfall"><div class="label">Pitfall</div><p>"Optional" fields in a schema are an invitation for a small model to skip them. If your code needs a field to be considered, make it required and allow <code>null</code>.</p></div>
+  <div class="box asked"><div class="label">If you are asked</div><p>"How do you make a small model reliable?" — "Measure where it fails, then take those decisions away from it. In this project, the language detection, VIN extraction and tool-argument checks moved into code. Tool routing went from 20–40% to 100%, and the model is left with the parts that need language understanding."</p></div>
+</section>
+
+<section>
+  <h2><span class="num">13</span>Live tools: recalls and chargers from open data</h2>
+  <p>Some answers cannot come from documents, because they change daily or depend on the customer's car or location. Two free public services cover them.</p>
+  <table>
+    <thead><tr><th>Tool</th><th>Services (free)</th><th>What happens</th></tr></thead>
+    <tbody>
+      <tr><td>Recall check</td><td>NHTSA vPIC (decodes a VIN into make, model and year) and NHTSA Recalls; US government, public domain, no key</td><td>VIN → vehicle → list of recall campaigns with component and summary. Outside the US, a note says that NHTSA covers US vehicles.</td></tr>
+      <tr><td>Charger search</td><td>OpenStreetMap Nominatim (place name → coordinates) and Open Charge Map (chargers near coordinates); free key, CC BY 4.0</td><td>Up to 5 public chargers within 5 km, with distance, power and connectors, and the data licence shown</td></tr>
+    </tbody>
+  </table>
+  <h3>Three rules for calling someone else's free service</h3>
+  <ol>
+    <li><b>Short timeouts</b> (10 s). A slow external service must not hang the chat.</li>
+    <li><b>Cache results</b>. Recall data changes slowly, and Nominatim's usage policy allows at most one request per second, so repeated questions are answered from memory.</li>
+    <li><b>Fail into a helpful reply.</b> Every failure becomes a <code>ToolUnavailableError</code>, and the customer gets "that service is not available right now; shall I connect you with a colleague?" instead of an error.</li>
+  </ol>
+  <p>Tool replies are built from fixed templates, not by a model. Live data is shown exactly as received, with its source, and no model can misquote a recall campaign number.</p>
+  <div class="box project"><div class="label">In this project</div><p><code>pipeline/tools.py</code> (calls, caching, an identifying <code>User-Agent</code>, as Nominatim requires) and the <code>recall</code>/<code>chargers</code> nodes in <code>graph.py</code>. The <code>tool_recall</code> and <code>tool_charger</code> golden categories reach 100% routing.</p></div>
+  <div class="box pitfall"><div class="label">Pitfall</div><p>Charger search needs a free Open Charge Map API key. Without one, the tool reports "unavailable" and offers a person. That is the designed degradation, not a crash. A recall result describes the <i>model year</i>; whether a particular car was already repaired can only be confirmed by a dealer, and the reply says so.</p></div>
+
+  <h2><span class="num">14</span>Grounded generation and validation</h2>
+  <p>The answer prompt keeps the prototype's rules (numbered passages, cite every fact, a fixed refusal sentence, temperature 0) and adds what production needs:</p>
+  <ul>
+    <li><b>The customer's market:</b> "where passages differ by market, answer for that market".</li>
+    <li><b>The customer's language:</b> "reply in German, even if the passages are in English". Cross-lingual questions reach 100% routing.</li>
+    <li><b>Partial answers:</b> answer the parts the passages cover and say which part is missing.</li>
+    <li><b>Passages are data:</b> they sit between <code>&lt;passages&gt;</code> tags and are declared reference text, not instructions (chapter 20).</li>
+  </ul>
+</section>
+
+<section>
+  <h3>The validate step: trust, but verify</h3>
+  <p>The model's answer is never shown as is. A deterministic <code>validate</code> node checks it first:</p>
+  <div class="flow">
+    <div class="step"><b>Normalise</b>【1】 → [1], [1-4] → [1, 2, 3, 4], odd spaces and hyphens</div><div class="arrow">→</div>
+    <div class="step"><b>Refusal or leak?</b>→ the fixed refusal</div><div class="arrow">→</div>
+    <div class="step"><b>Drop invalid citations</b>[7] with 4 passages is removed</div><div class="arrow">→</div>
+    <div class="step"><b>No citation left?</b>→ refusal: no uncited claims</div><div class="arrow">→</div>
+    <div class="step"><b>Scrub echo</b>customer's personal data removed</div>
+  </div>
+  <p>Only the cited passages become the "sources" shown under the answer, with title, section, licence and the passage text.</p>
+  <div class="box pitfall"><div class="label">Pitfall</div><p>Models differ in how they write citations. The cloud model gpt-oss writes <code>【1】</code> (CJK brackets) and puts narrow no-break spaces inside phone numbers. Before normalisation, valid answers were being thrown away as "uncited". Test the validator with every model you allow.</p></div>
+  <div class="box key"><div class="label">Key idea</div><p>An answer that cites nothing is treated as a failed answer, not a confident one. This rule turns "the model invented something" from an invisible error into a visible refusal plus an offer to talk to a person.</p></div>
+
+  <h2><span class="num">15</span>Models: local first, free cloud optional, never crash</h2>
+  <p>A model is chosen with one setting, <code>CS_CHAT_MODEL</code>, written as <code>provider:model</code>. LangChain's <code>init_chat_model</code> turns that string into a client, so switching from the local model to a cloud model is a configuration change, not a code change.</p>
+  <table>
+    <thead><tr><th>Role</th><th>Model</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td>Chat (default)</td><td><code>ollama:gemma3:4b</code></td><td>Local, free, no quota, no data leaves the machine</td></tr>
+      <tr><td>Chat (optional)</td><td><code>groq:openai/gpt-oss-120b</code> (open weights, Apache-2.0), reasoning effort low</td><td>Groq free tier, no card</td></tr>
+      <tr><td>Embeddings</td><td><code>qwen3-embedding:4b</code> (or 0.6b on small machines)</td><td>Local</td></tr>
+      <tr><td>Judge (evaluation only)</td><td><code>groq:qwen/qwen3.8-27b</code>, a different model family</td><td>Groq free tier</td></tr>
+    </tbody>
+  </table>
+  <h3>Resilience: retry, fall back, degrade</h3>
+<pre>def _resilient(primary, fallbacks):
+    model = primary.with_retry(stop_after_attempt=2)  # a crashed local runner restarts on retry
+    if not fallbacks:
+        return model
+    return model.with_fallbacks([f.with_retry(stop_after_attempt=2) for f in fallbacks])</pre>
+  <ol>
+    <li><b>Retry once.</b> When the local Ollama runner crashed under memory pressure, the next request restarted it, so one retry turned a crash into a delay.</li>
+    <li><b>Fallback chain.</b> <code>CS_FALLBACK_CHAT_MODEL</code> takes a comma-separated list of models, tried in order.</li>
+    <li><b>Degrade.</b> If every model fails, the customer reads "service unavailable, shall I connect you with a colleague?", and the failure is counted on the dashboard.</li>
+  </ol>
+  <h3>New concept: free-tier quotas</h3>
+  <p>Groq's free tier allows 200,000 tokens per model per day. One full evaluation run uses about 220,000, so cloud evaluations run in two halves (<code>--part 1/2</code>, then <code>--part 2/2</code>) on different nights. A fallback chain over different models multiplies the daily capacity, because each model has its own quota.</p>
+  <div class="box pitfall"><div class="label">Pitfall</div><p>Models get retired. The originally planned Groq model (llama-3.3-70b) was no longer offered when the pipeline was built, which is why the model is a setting, not a constant. And spreading load over several free accounts to get around limits breaks the provider's terms, so the project uses one key.</p></div>
+  <div class="box asked"><div class="label">If you are asked</div><p>"What happens if the LLM is down?" — "Each call retries once, then walks a configurable fallback chain. If everything fails, the customer gets a polite 'unavailable, shall I connect you with someone?' and a counter goes up on the dashboard. The understand step falls back to rules, and tools fail into the same reply. The chat never shows an error."</p></div>
+</section>

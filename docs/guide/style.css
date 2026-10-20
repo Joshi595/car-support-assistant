@@ -1,0 +1,94 @@
+/* Production guide: same visual language as Part 1 (RAG_Project_Concepts_Guide.pdf) so the two read as a set. */
+@page {
+  size: A4; margin: 18mm 18mm 20mm 18mm;
+  @bottom-left { content: "Car Support RAG · Part 2: From Prototype to Production"; font: 7.5pt "Segoe UI", Arial, sans-serif; color: #8a97a5; }
+  @bottom-right { content: counter(page); font: 8pt "Segoe UI", Arial, sans-serif; color: #8a97a5; }
+}
+@page :first { margin: 0; @bottom-left { content: none; } @bottom-right { content: none; } }
+
+:root {
+  --ink: #1d2733;
+  --muted: #5d6b7a;
+  --blue: #22568f;
+  --blue-soft: #e8f0f9;
+  --rule: #d5dde6;
+  --key: #2f5f9e;     --key-bg: #eaf1fa;
+  --analogy: #c7861d; --analogy-bg: #fdf3e2;
+  --project: #26705f; --project-bg: #e6f2ee;
+  --asked: #3d8a47;   --asked-bg: #eaf5ea;
+  --pitfall: #b54150; --pitfall-bg: #fbeaec;
+}
+
+html { font-family: "Segoe UI", "Noto Sans", Arial, sans-serif; color: var(--ink); font-size: 10.4pt; line-height: 1.55; }
+body { margin: 0; }
+h1, h2, h3 { color: var(--blue); line-height: 1.25; break-after: avoid; }
+h1 { font-size: 22pt; margin: 0 0 6mm; }
+section > h2:first-child { margin-top: 0; }
+h2 { font-size: 15pt; margin: 9mm 0 3mm; border-bottom: 1px solid var(--rule); padding-bottom: 1.5mm; }
+h2 .num { color: #8aa3c0; font-weight: 600; margin-right: 2mm; }
+h3 { font-size: 11.5pt; margin: 5mm 0 2mm; color: var(--ink); }
+p { margin: 0 0 2.6mm; }
+ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
+li { margin-bottom: 1mm; }
+code { font-family: "Cascadia Code", Consolas, monospace; font-size: 0.88em; background: #eef2f6; padding: 0.3mm 1.2mm; border-radius: 2px; }
+pre { font-family: "Cascadia Code", Consolas, monospace; font-size: 8.4pt; line-height: 1.45; background: #f3f6f9; border: 1px solid var(--rule); border-radius: 4px; padding: 3mm 4mm; white-space: pre-wrap; break-inside: avoid; margin: 0 0 3.5mm; }
+pre code { background: none; padding: 0; font-size: 1em; }
+.file { break-after: avoid; font-size: 8.4pt; color: var(--muted); font-weight: 600; margin: 3mm 0 1mm; }
+table { width: 100%; border-collapse: collapse; margin: 0 0 4mm; font-size: 9.2pt; break-inside: auto; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+th { background: #eef2f7; text-align: left; font-weight: 600; }
+th, td { border-bottom: 1px solid var(--rule); padding: 1.6mm 2mm; vertical-align: top; }
+td.n, th.n { text-align: right; white-space: nowrap; }
+.caption { font-size: 8.6pt; color: var(--muted); text-align: center; margin: -1mm 0 4mm; }
+.page { break-before: page; }
+
+/* The five box types of Part 1. */
+.box { border-left: 4px solid; border-radius: 0 6px 6px 0; padding: 3mm 4.5mm; margin: 0 0 4mm; break-inside: avoid; }
+.box > .label { font-size: 7.6pt; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 1.2mm; }
+.box p:last-child, .box ul:last-child { margin-bottom: 0; }
+.key { border-color: var(--key); background: var(--key-bg); } .key .label { color: var(--key); }
+.analogy { border-color: var(--analogy); background: var(--analogy-bg); } .analogy .label { color: var(--analogy); }
+.project { border-color: var(--project); background: var(--project-bg); } .project .label { color: var(--project); }
+.asked { border-color: var(--asked); background: var(--asked-bg); } .asked .label { color: var(--asked); }
+.pitfall { border-color: var(--pitfall); background: var(--pitfall-bg); } .pitfall .label { color: var(--pitfall); }
+
+/* Cover and part openers, as in Part 1. */
+.cover { height: 297mm; box-sizing: border-box; padding: 38mm 22mm 20mm; color: #fff; background: linear-gradient(160deg, #1d3e6b 0%, #2a63a3 100%); display: flex; flex-direction: column; }
+.cover .kicker { letter-spacing: 0.18em; font-size: 9pt; font-weight: 600; opacity: 0.85; }
+.cover h1 { color: #fff; font-size: 34pt; margin: 6mm 0 6mm; line-height: 1.15; }
+.cover .lede { font-size: 13pt; max-width: 150mm; opacity: 0.95; }
+.cover .chips { margin-top: 18mm; display: flex; flex-wrap: wrap; gap: 2.5mm; max-width: 160mm; }
+.cover .chips span { border: 1px solid rgba(255,255,255,0.6); border-radius: 999px; padding: 1.4mm 4mm; font-size: 9pt; }
+.cover .foot { margin-top: auto; border-top: 1px solid rgba(255,255,255,0.35); padding-top: 4mm; font-size: 8.8pt; opacity: 0.9; }
+.part { break-before: page; break-after: page; padding-top: 60mm; }
+.part .kicker { color: var(--blue); letter-spacing: 0.18em; font-size: 9pt; font-weight: 700; }
+.part h1 { font-size: 30pt; color: var(--ink); margin: 3mm 0 5mm; }
+.part p.lede { color: var(--muted); font-size: 11.5pt; max-width: 140mm; }
+.part ul { color: var(--muted); list-style: none; padding-left: 0; }
+
+.toc ol { list-style: none; padding-left: 0; }
+.toc li { margin: 0.3mm 0; font-size: 9.8pt; }
+.toc .part-title { font-weight: 700; margin-top: 2.4mm; }
+.toc .ch { padding-left: 6mm; color: var(--ink); }
+
+/* Diagrams drawn with HTML so they print crisply. */
+.flow { display: flex; align-items: stretch; gap: 2mm; margin: 2mm 0 4mm; flex-wrap: wrap; }
+.flow .step { flex: 1 1 0; min-width: 22mm; border: 1.5px solid var(--blue); border-radius: 5px; padding: 2mm 2.5mm; font-size: 8.6pt; background: #fff; }
+.flow .step b { display: block; color: var(--blue); font-size: 9pt; }
+.flow .arrow { align-self: center; color: var(--blue); font-weight: 700; }
+.lane { border: 1px solid var(--rule); border-radius: 6px; padding: 3mm; margin-bottom: 3mm; background: #fafcfe; }
+.lane .title { font-size: 7.8pt; font-weight: 700; letter-spacing: 0.12em; color: var(--blue); margin-bottom: 2mm; }
+.versus td:first-child { font-weight: 600; width: 22%; }
+.compact { font-size: 8.8pt; }
+.compact th, .compact td { padding: 1.1mm 2mm; }
+.compact .flow .step { padding: 1.5mm 2mm; }
+.big { font-size: 20pt; font-weight: 700; color: var(--blue); }
+.stats { display: flex; gap: 4mm; margin: 2mm 0 5mm; }
+.stats > div { flex: 1; border: 1px solid var(--rule); border-radius: 6px; padding: 3mm; }
+.stats .small { font-size: 8.4pt; color: var(--muted); }
+.cols { columns: 2; column-gap: 8mm; }
+.cols dt { font-weight: 700; break-after: avoid; }
+.cols dd { margin: 0 0 2.5mm; break-inside: avoid; }
+.footer-note { font-size: 8.4pt; color: var(--muted); }
+pre.diagram { white-space: pre; font-size: 7.8pt; }

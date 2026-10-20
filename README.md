@@ -63,6 +63,8 @@ FastAPI ──► Postgres + pgvector (documents, chunks, conversations, tickets
 
 Details: [architecture](docs/architecture.md), [runbook](docs/runbook.md), [data](data/README.md), [frontend](frontend/README.md).
 
+**Learning guide:** [From Prototype to Production](docs/guide/RAG_Production_Guide.pdf) (PDF, 48 pages) explains every change from the prototype, how it was made and the numbers behind it, with analogies, code excerpts and interview questions. Rebuild it with `python docs/guide/build.py`.
+
 ## Decisions
 
 Every choice was measured on the golden set; each record gives the numbers.

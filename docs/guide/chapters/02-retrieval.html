@@ -1,0 +1,121 @@
+<section class="part">
+  <div class="kicker">PART C</div>
+  <h1>Retrieval: what the evaluation overturned</h1>
+  <p class="lede">The plan said "hybrid search plus a cross-encoder reranker". The measurements said otherwise. This part shows the filters that make answers market-correct, then the numbers that changed the design.</p>
+  <ul><li>7. Filters and versions inside one SQL query</li><li>8. A bigger embedding model, and why hybrid search and reranking lost</li><li>9. The off-topic gate, and what a similarity score cannot know</li><li>10. Speed on a laptop: two surprising fixes</li></ul>
+</section>
+
+<section>
+  <h2><span class="num">7</span>Filters and versions inside one SQL query</h2>
+  <p>A UK customer must never get the German warranty, and nobody should get the 2027 tariffs in 2026. The prototype had no such problem, since every document applied to everyone. Here, two rules are applied <b>before</b> anything is ranked:</p>
+  <ol>
+    <li><b>Market:</b> only documents for the customer's market, plus <code>global</code> ones (model guides, manuals).</li>
+    <li><b>Version:</b> per <code>doc_id</code>, only the newest version whose <code>valid_from</code> is on or before today.</li>
+  </ol>
+  <div class="file">backend/src/car_support/retrieval/search.py (first step of the query)</div>
+<pre>WITH eligible AS (
+    SELECT DISTINCT ON (doc_id) path FROM documents
+    WHERE market IN (:market, 'global') AND valid_from &lt;= :as_of AND source_type = ANY(:source_types)
+    ORDER BY doc_id, valid_from DESC
+),
+dense AS (
+    SELECT c.id, row_number() OVER (ORDER BY c.embedding &lt;=&gt; CAST(:qvec AS vector)) AS rank
+    FROM chunks c JOIN eligible e ON e.path = c.document_path
+    ...</pre>
+  <h3>New concept: DISTINCT ON</h3>
+  <p><code>DISTINCT ON (doc_id) … ORDER BY doc_id, valid_from DESC</code> is a Postgres feature that keeps the <i>first</i> row of each group. Sorted newest first and already limited to dates on or before today, the first row is exactly "the version valid today". When 1 January 2027 arrives, the new tariffs take over by themselves, with no re-index and no deployment.</p>
+  <h3>Filter first, then rank</h3>
+  <p>If you first take the top 4 passages and then drop the wrong-market ones, you may be left with 1 or 0. Filtering inside the query means the 4 results are the best 4 <i>among the allowed documents</i>.</p>
+  <div class="box analogy"><div class="label">Analogy</div><p>Shopping in the UK aisle before comparing prices, instead of picking the four cheapest items in the whole store and then discovering that three are only sold in Germany.</p></div>
+  <div class="box project"><div class="label">In this project</div><p>The <code>Filters(market, as_of, source_types)</code> dataclass in <code>search.py</code>. Because filtering happens inside the query, a passage from another market cannot be retrieved at all; an integration test in <code>tests/test_search.py</code> pins this. The <code>version</code> questions pass 100%, so the 2027 tariff never appears in 2026. The remaining misses in the <code>market</code> category (78% at rank 1) pick the wrong <i>section</i> within the right market, not the wrong market.</p></div>
+  <div class="box pitfall"><div class="label">Pitfall</div><p><code>as_of</code> comes from the request, not a constant. Tests set it explicitly, so a test written in 2026 does not start failing on 1 January 2027 when the newer tariff document becomes valid.</p></div>
+</section>
+
+<section>
+  <h2><span class="num">8</span>A bigger embedding model, and why hybrid search and reranking lost</h2>
+  <p>The prototype's numbers came from 30 chunks. Here there are 408, in two languages, with markets that deliberately contradict each other. Every candidate design was measured on the 146 answerable golden questions.</p>
+  <table>
+    <thead><tr><th>Embeddings</th><th>Setup</th><th class="n">Hit@1</th><th class="n">Hit@4</th><th class="n">MRR</th><th class="n">Time</th></tr></thead>
+    <tbody>
+      <tr><td>qwen3-embedding:0.6b</td><td>dense</td><td class="n">71%</td><td class="n">92%</td><td class="n">0.810</td><td class="n"></td></tr>
+      <tr><td></td><td>hybrid (keyword weight 0.5)</td><td class="n">71%</td><td class="n">92%</td><td class="n">0.809</td><td class="n"></td></tr>
+      <tr><td></td><td>hybrid + English cross-encoder</td><td class="n">77%</td><td class="n">91%</td><td class="n">0.835</td><td class="n">~0.9 s</td></tr>
+      <tr><td></td><td>hybrid + multilingual cross-encoder</td><td class="n">36%</td><td class="n">64%</td><td class="n">0.508</td><td class="n">~1.9 s</td></tr>
+      <tr style="background:#eef5ee"><td><b>qwen3-embedding:4b</b></td><td><b>dense</b> (chosen)</td><td class="n"><b>87%</b></td><td class="n"><b>97%</b></td><td class="n"><b>0.917</b></td><td class="n">11 ms</td></tr>
+      <tr><td></td><td>dense, no query instruction</td><td class="n">77%</td><td class="n">94%</td><td class="n">0.849</td><td class="n"></td></tr>
+      <tr><td></td><td>hybrid (keyword weight 0.1)</td><td class="n">84%</td><td class="n">95%</td><td class="n">0.901</td><td class="n"></td></tr>
+      <tr><td></td><td>hybrid (keyword weight 0.5)</td><td class="n">77%</td><td class="n">93%</td><td class="n">0.850</td><td class="n"></td></tr>
+      <tr><td></td><td>keyword only (Postgres full-text)</td><td class="n">38%</td><td class="n">67%</td><td class="n">0.517</td><td class="n"></td></tr>
+    </tbody>
+  </table>
+  <p class="caption">146 answerable golden questions. Source: ADR 0003 and backend/eval/results/retrieval-*.md.</p>
+
+  <h3>Lesson 1: the embedding model was the biggest lever</h3>
+  <p>Going from the 0.6B to the 4B Qwen3 embedding model raised Hit@1 by 16 points (71% → 87%). No retrieval trick came close.</p>
+
+  <h3>New concept: Matryoshka embeddings</h3>
+  <p>The 4B model normally produces 2,560 numbers per text. The schema stores 1,024, and pgvector's HNSW index allows at most 2,000. Qwen3-Embedding is <b>Matryoshka-trained</b>: during training, the first 32, 64, …, 1,024 numbers were each made to work as an embedding on their own. So asking for 1,024 dimensions gives a slightly smaller but still excellent vector, and no migration was needed.</p>
+  <div class="box analogy"><div class="label">Analogy</div><p>Russian nesting dolls: each smaller doll is a complete doll, not a fragment. A JPEG preview is similar, a smaller version of the same picture rather than one corner of it.</p></div>
+
+  <h3>Lesson 2: the query instruction is worth 10 points</h3>
+  <p>Qwen3-Embedding was trained with a short task description in front of each <i>question</i> (not in front of the documents). Leaving it out dropped Hit@1 from 87% to 77%.</p>
+<pre>texts = [f"Instruct: {instruction}\nQuery: {q}" for q in queries]   # llm.py, embed_queries</pre>
+  <div class="box pitfall"><div class="label">Pitfall</div><p>Read the model card. Many embedding models (Qwen3, E5, BGE) expect a query prefix, and leaving it out is a silent loss. Nothing errors; the results just get worse.</p></div>
+
+  <h3>Lesson 3: hybrid search stopped helping</h3>
+  <p>In the prototype, hybrid search was the only mode strong on both natural and keyword questions. With a strong embedding model, every keyword weight <i>lowered</i> the scores. Keyword-style queries such as "SOS button" or "V2L" already reach 92% with dense search alone, so the keyword side mostly added noise. Dense search became the default. The hybrid SQL path stays in the code (<code>CS_RETRIEVAL_MODE=hybrid</code>), because it costs nothing to keep and may matter for exact part numbers in a bigger corpus.</p>
+  <div class="box key"><div class="label">Key idea</div><p>A technique that wins with a weak component can lose with a strong one. Hybrid search compensates for weak embeddings, and once the embeddings are strong, the compensation becomes noise. Re-measure when you change a part.</p></div>
+</section>
+
+<section>
+  <h3>Lesson 4: the reranker was removed</h3>
+  <p>The plan included a cross-encoder reranker, a standard production component. To see why it failed here, compare the two kinds of model:</p>
+  <table>
+    <thead><tr><th></th><th>Bi-encoder (embedding model)</th><th>Cross-encoder (reranker)</th></tr></thead>
+    <tbody>
+      <tr><td>How it reads</td><td>Question and passage <b>separately</b>, each into a vector</td><td>Question and passage <b>together</b>, as one input</td></tr>
+      <tr><td>Output</td><td>Two vectors; similarity = their cosine</td><td>One relevance score</td></tr>
+      <tr><td>Cost</td><td>Passages embedded once at ingest; a search takes milliseconds</td><td>One model run per (question, passage) pair, at query time</td></tr>
+      <tr><td>Typical use</td><td>Find ~30 candidates out of millions</td><td>Reorder those ~30 precisely</td></tr>
+    </tbody>
+  </table>
+  <p>A cross-encoder usually ranks more accurately because it sees both texts at once. Here, the available free CPU rerankers (FlashRank's small ONNX models) were far smaller than the 4B embedding model they were meant to correct:</p>
+  <ul>
+    <li>The English cross-encoder added 1 point at Hit@1 over the hybrid candidates it reordered (77% → 78%), still well below dense search alone (87%). It cost about 120 times the search latency (1.3 s instead of 11 ms) and hurt the German questions.</li>
+    <li>The multilingual cross-encoder was harmful (Hit@1 36%), and its scores clustered around 0.999, so they could not serve as a "relevant or not" signal either.</li>
+  </ul>
+  <p>The reranker and the FlashRank dependency were removed.</p>
+  <div class="box asked"><div class="label">If you are asked</div><p>"Did you use a reranker?" — "I planned one and measured it. With a 4B embedding model, the small CPU cross-encoders added at most one point at over 100 times the latency, hurt German questions, and their scores were too saturated to use as a refusal signal. I removed it, and the decision record keeps the numbers. A larger multilingual reranker on a GPU would be worth testing at scale."</p></div>
+
+  <h2><span class="num">9</span>The off-topic gate, and what a similarity score cannot know</h2>
+  <p>The prototype relied entirely on the prompt to refuse unanswerable questions. Calling the chat model for "what's a good pizza place?" is wasted time and money, so production adds a cheap gate. If not a single retrieved passage reaches a minimum cosine similarity, the assistant refuses without calling the chat model.</p>
+  <h3>Choosing the threshold from data</h3>
+  <ul>
+    <li>With the 4B model, the lowest similarity of any <i>answerable</i> question was 0.448 (a bare keyword query, "LL-26 0W-20").</li>
+    <li>The threshold was set just below that, at <b>0.40</b>, so the gate wrongly refuses none of the answerable questions.</li>
+    <li>It catches only the obviously unrelated questions: 2 of 10 out-of-scope ones (pizza, football).</li>
+  </ul>
+  <h3>Why it cannot do more</h3>
+  <p>"What is the Ion 4's drag coefficient?" is about the right car, uses the right vocabulary, and scores 0.69, which is higher than many answerable questions. But the documents simply do not contain the number. <b>No similarity score can tell "on-topic and answered" from "on-topic but not answered"</b>, because similarity measures topic, not whether the answer is present. That decision belongs to the grounded answer step, which refuses when the passages lack the fact (chapter 14).</p>
+  <div class="box key"><div class="label">Key idea</div><p>The gate is a cheap filter for the obvious cases, not a judge of answerability. Two layers do two different jobs.</p></div>
+
+  <h3>The threshold depends on the model</h3>
+  <p>When CI ran retrieval with the smaller 0.6B model (to fit on a free CI machine), the 0.40 threshold wrongly refused 3 answerable questions. The smaller model's similarities simply run lower: its lowest answerable question scores 0.303. The threshold is therefore stored per model, each value measured on the golden set:</p>
+<pre>RELEVANCE_THRESHOLDS = {"qwen3-embedding:4b": 0.40, "qwen3-embedding:0.6b": 0.28}   # config.py
+# An unmeasured model gets no gate; the grounded answer step still refuses.</pre>
+  <div class="box pitfall"><div class="label">Pitfall</div><p>Similarity thresholds are not portable between embedding models (or even model versions). Treat a threshold as a measured property of a specific model, and re-measure it whenever the model changes.</p></div>
+</section>
+
+<section>
+  <h2><span class="num">10</span>Speed on a laptop: two surprising fixes</h2>
+  <p>Two changes with nothing to do with AI mattered more for speed than any model choice.</p>
+  <h3>Fix 1: <code>127.0.0.1</code> instead of <code>localhost</code></h3>
+  <p>Embedding one question took 2.3 seconds. The model was not the problem. On Windows, <code>localhost</code> resolves to the IPv6 address first, the local server was listening on IPv4, and every new connection waited about 2 seconds before falling back. Writing the IPv4 address directly brought a query embedding down to <b>74 ms</b>, about 30 times faster.</p>
+  <div class="box analogy"><div class="label">Analogy</div><p>Ringing the front door of a house whose owner only ever answers the side door. They do answer eventually, after you give up on the front door.</p></div>
+  <h3>Fix 2: question embeddings on the CPU</h3>
+  <p>The laptop GPU has 6 GB of memory. The 4B embedding model (~3.4 GB) and the 4B chat model (~3.4 GB) do not fit together, so Ollama unloaded one to load the other, <b>for every question</b>: 5–10 seconds of swapping. Embedding a single short question is light work, so it now runs on the CPU (about 0.5 s) while the chat model stays resident on the GPU. A knowledge-base answer now takes <b>1.6–2.8 s</b>.</p>
+<pre>"options": {"num_gpu": 0} if on_cpu else {}     # llm.py: zero GPU layers = run on the CPU</pre>
+  <div class="box key"><div class="label">Key idea</div><p>Measure where the time goes before optimising. Here the big wins were a network detail and memory placement, not a smaller model.</p></div>
+  <div class="box project"><div class="label">In this project</div><p><code>CS_OLLAMA_URL=http://127.0.0.1:11434</code>, <code>CS_QUERY_EMBEDDING_ON_CPU=true</code>. Document embeddings at ingest still use the GPU, where batch throughput matters.</p></div>
+  <div class="box pitfall"><div class="label">Pitfall</div><p>The full local stack (Postgres, the 4B embedder, the 4B chat model, a browser, the IDE) needs about 16 GB of RAM. When memory ran out, the local model runner crashed in the middle of an evaluation. That led to the retry-and-degrade design in chapter 15. Lighter options are the 0.6B embedder or a cloud chat model.</p></div>
+</section>
