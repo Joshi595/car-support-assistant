@@ -111,11 +111,17 @@ def feedback(agent: Agent, rating: int | None = None) -> list[dict[str, Any]]:
     if rating not in (None, 1, -1):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "rating must be 1 or -1")
     with get_session() as session:
-        query = select(Feedback, Message).join(Message).order_by(Feedback.created_at.desc())
+        query = (
+            select(Feedback, Message, Conversation.market)
+            .select_from(Feedback)
+            .join(Message, Message.id == Feedback.message_id)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .order_by(Feedback.created_at.desc())
+        )
         if rating is not None:
             query = query.where(Feedback.rating == rating)
         out = []
-        for f, answer in session.execute(query.limit(200)).all():
+        for f, answer, market in session.execute(query.limit(200)).all():
             question = session.scalar(
                 select(Message.content)
                 .where(
@@ -130,6 +136,7 @@ def feedback(agent: Agent, rating: int | None = None) -> list[dict[str, Any]]:
                 {
                     "message_id": answer.id,
                     "conversation_id": answer.conversation_id,
+                    "market": market,
                     "rating": f.rating,
                     "comment": f.comment,
                     "question": question,

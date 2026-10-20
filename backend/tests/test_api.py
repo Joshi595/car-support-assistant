@@ -154,7 +154,9 @@ def test_feedback_belongs_to_its_conversation_and_can_be_changed(
 
     rated = client.get("/v1/admin/feedback?rating=-1", headers=_agent_headers()).json()
     entry = next(f for f in rated if f["message_id"] == mid)
-    assert entry["question"] == "Battery warranty?" and entry["comment"] == "wrong"
+    assert (
+        entry["question"] == "Battery warranty?" and entry["comment"] == "wrong" and entry["market"] == "uk"
+    )
 
 
 @pytest.mark.integration
