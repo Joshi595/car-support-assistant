@@ -1,0 +1,62 @@
+name: Nightly evaluation
+
+# The full pipeline on the golden set, graded by an LLM judge, on Groq's free tier. Free tiers cap tokens per
+# model per day, so each night runs half the set (alternating halves); the pipeline and the judge use
+# different models, which have separate quotas.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      part:
+        description: "Which half to run: 1/2, 2/2 (or 1/1 for everything, if your quota allows)"
+        default: ""
+
+jobs:
+  answers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: car_support
+          POSTGRES_PASSWORD: car_support
+          POSTGRES_DB: car_support
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U car_support" --health-interval 5s --health-retries 10
+    env:
+      CS_EMBED_MODEL: qwen3-embedding:4b
+      CS_QUERY_EMBEDDING_ON_CPU: "false"
+      CS_CHAT_MODEL: groq:openai/gpt-oss-120b
+      CS_GROQ_API_KEY: ${{ secrets.CS_GROQ_API_KEY }}
+      JUDGE: groq:qwen/qwen3.8-27b
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ~/.ollama/models
+          key: ollama-qwen3-embedding-4b
+      - name: Install Ollama and pull the embedding model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve > /tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do curl -s localhost:11434/api/version && break; sleep 1; done
+          ollama pull "$CS_EMBED_MODEL"
+      - run: uv sync --locked
+      - run: uv run alembic upgrade head
+      - run: uv run car-support ingest
+      - name: Evaluate (half of the golden set, alternating by day)
+        run: |
+          PART="${{ github.event.inputs.part }}"
+          if [ -z "$PART" ]; then PART="$(( $(date +%j) % 2 + 1 ))/2"; fi
+          uv run python eval/run.py answers --part "$PART" --judge "$JUDGE"
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: answers-report
+          path: backend/eval/results/answers-*.md
