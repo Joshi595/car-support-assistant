@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+/* Northwind service bay: cool glacier surfaces, navy ink, fjord-blue actions.
+   Signal amber is reserved for citations, like a warning lamp on the dashboard. */
+:root {
+  --glacier: #eef3f6;
+  --surface: #ffffff;
+  --ink: #13263a;
+  --slate: #5b6b7a;
+  --line: #c9d5de;
+  --fjord: #1f5e8c;
+  --fjord-soft: #dde9f2;
+  --amber: #f2a900;
+  --amber-ink: #3d2b00;
+  --danger: #a3301f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --glacier: #0e1b27;
+    --surface: #132433;
+    --ink: #e3ecf2;
+    --slate: #93a4b3;
+    --line: #2a4054;
+    --fjord: #6fb1e0;
+    --fjord-soft: #1b3448;
+    --amber: #ffc23d;
+    --amber-ink: #2a1d00;
+    --danger: #ff8a75;
+  }
+}
+
+@theme inline {
+  --color-glacier: var(--glacier);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-slate: var(--slate);
+  --color-line: var(--line);
+  --color-fjord: var(--fjord);
+  --color-fjord-soft: var(--fjord-soft);
+  --color-amber: var(--amber);
+  --color-amber-ink: var(--amber-ink);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+}
+
+body {
+  background: var(--glacier);
+  color: var(--ink);
+  font-family: var(--font-body), system-ui, sans-serif;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 3px solid var(--fjord);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Answers read like a manual: comfortable measure, real lists. */
+.answer p + p,
+.answer p + ul,
+.answer ul + p {
+  margin-top: 0.6em;
+}
+.answer ul,
+.answer ol {
+  padding-left: 1.25em;
+  list-style: disc;
+}
+.answer ol {
+  list-style: decimal;
+}
+.answer li + li {
+  margin-top: 0.2em;
+}
+.answer strong {
+  font-weight: 650;
+}
+
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+.caret::after {
+  content: "";
+  display: inline-block;
+  width: 0.5ch;
+  height: 1.1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--fjord);
+  animation: caret 1s steps(1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret::after {
+    animation: none;
+  }
+  * {
+    transition: none !important;
+  }
+}
