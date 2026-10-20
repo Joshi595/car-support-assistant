@@ -1,5 +1,5 @@
-/** The backend API, called directly from the browser (CORS allows the frontend's origin). */
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+/** The customer API, reached through this app's own origin (src/app/backend forwards to the API). */
+export const API_URL = "/backend";
 
 export type Market = "uk" | "us" | "de";
 

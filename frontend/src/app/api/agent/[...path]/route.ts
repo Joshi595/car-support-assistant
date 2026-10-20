@@ -5,7 +5,7 @@ import { authOptions, isAgent } from "@/lib/auth";
 
 // Agent requests go through the frontend's server: it checks the agent's session, then calls the backend's
 // /v1/admin routes with a short-lived token signed with the shared secret. The browser never sees the secret.
-const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const API_URL = process.env.API_URL ?? "http://127.0.0.1:8000";
 
 async function forward(request: NextRequest, ctx: RouteContext<"/api/agent/[...path]">): Promise<Response> {
   const session = await getServerSession(authOptions);
