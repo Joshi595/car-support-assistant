@@ -2,7 +2,7 @@
 
 from sqlalchemy.orm import Session
 
-from car_support.config import get_settings
+from car_support.config import get_settings, relevance_threshold
 from car_support.llm import embed_queries
 from car_support.retrieval.search import Filters, Mode, Passage, search
 
@@ -37,5 +37,5 @@ def is_relevant(passages: list[Passage], threshold: float | None = None) -> bool
     A conservative pre-filter only. Questions that sound in-domain but are not answered by the documents
     ("What is the drag coefficient?") pass it and are refused by the grounded answer step instead.
     """
-    limit = get_settings().relevance_threshold if threshold is None else threshold
+    limit = relevance_threshold(get_settings()) if threshold is None else threshold
     return bool(passages) and max(p.similarity for p in passages) >= limit

@@ -51,7 +51,9 @@ class Settings(BaseSettings):
     candidates: int = 30  # per-ranker pool before fusion (hybrid mode)
     keyword_weight: float = 0.1  # weight of full-text ranks in hybrid fusion (dense = 1.0)
     answer_cache: bool = True  # exact-match cache of knowledge-base answers (see pipeline/cache.py)
-    relevance_threshold: float = 0.40  # top cosine similarity below this = clearly off-topic (ADR 0003)
+    # Top cosine similarity below which a question is clearly off-topic. Similarity scales differ per
+    # embedding model, so the default comes from RELEVANCE_THRESHOLDS (ADR 0003); set it to override.
+    relevance_threshold: float | None = None
 
     # Observability. Traces go to a self-hosted Phoenix, e.g. "http://127.0.0.1:6006/v1/traces"; empty = off.
     tracing_endpoint: str = ""
@@ -66,6 +68,17 @@ class Settings(BaseSettings):
     # Live tools. Open Charge Map needs a free key (openchargemap.org); without one the tool says so.
     open_charge_map_key: str = ""
     http_user_agent: str = "car-support-assistant/0.1 (+https://github.com/Joshi595/car-support-assistant)"
+
+
+# Measured on the golden set: just below the lowest score of an answerable question, so the gate never refuses
+# one. A model without a measured value gets no gate (0.0); the grounded answer step still refuses.
+RELEVANCE_THRESHOLDS = {"qwen3-embedding:4b": 0.40, "qwen3-embedding:0.6b": 0.28}
+
+
+def relevance_threshold(settings: Settings) -> float:
+    if settings.relevance_threshold is not None:
+        return settings.relevance_threshold
+    return RELEVANCE_THRESHOLDS.get(settings.embed_model, 0.0)
 
 
 @lru_cache

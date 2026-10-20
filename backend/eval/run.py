@@ -23,7 +23,7 @@ from typing import Any
 
 os.environ.setdefault("CS_ANSWER_CACHE", "false")  # every run measures the pipeline, not the cache
 
-from car_support.config import get_settings
+from car_support.config import get_settings, relevance_threshold
 from car_support.db.session import get_session
 from car_support.llm import embed_queries
 from car_support.retrieval import Filters, Passage, retrieve
@@ -109,7 +109,7 @@ def retrieval_report(setups: dict[str, Setup]) -> tuple[str, dict[str, dict[str,
 
         positive = [top_similarity(c) for c in cases]
         negative = {c["id"]: top_similarity(c) for c in negatives}
-    threshold = settings.relevance_threshold
+    threshold = relevance_threshold(settings)
     refused = sum(s < threshold for s in negative.values())
     listed = ", ".join(f"{i} {s:.2f}" for i, s in sorted(negative.items(), key=lambda x: x[1]))
     lines += ["", "Category columns show Hit@1. Not at rank 1 (rank in brackets, None = not in top 10):", ""]
