@@ -2,6 +2,8 @@
 
     uv run python eval/run.py retrieval   # Hit@k / MRR per retrieval setup, off-topic gate analysis
     uv run python eval/run.py answers     # full pipeline: routing, facts, citations, latency
+    uv run python eval/run.py answers --judge groq:qwen/qwen3.8-27b   # + LLM judge verdicts
+    uv run python eval/run.py retrieval --min-hit4 0.9 --min-mrr 0.78 # fail (exit 1) below thresholds
 
 Needs the indexed database and Ollama. Reports go to eval/results/.
 """
@@ -21,7 +23,7 @@ from typing import Any
 
 os.environ.setdefault("CS_ANSWER_CACHE", "false")  # every run measures the pipeline, not the cache
 
-from car_support.config import get_settings
+from car_support.config import get_settings, relevance_threshold
 from car_support.db.session import get_session
 from car_support.llm import embed_queries
 from car_support.retrieval import Filters, Passage, retrieve
@@ -54,7 +56,7 @@ def pct(values: list[bool]) -> str:
 Setup = Callable[[Any, dict[str, Any], list[float]], list[Passage]]
 
 
-def retrieval_report(setups: dict[str, Setup]) -> str:
+def retrieval_report(setups: dict[str, Setup]) -> tuple[str, dict[str, dict[str, float]]]:
     # Follow-ups need the condense step (Phase 4); they are evaluated end to end, not here.
     cases = [c for c in GOLDEN if c["route"] == "kb" and c["category"] != "followup"]
     negatives = [c for c in GOLDEN if c["category"] == "out_of_scope"]
@@ -77,6 +79,7 @@ def retrieval_report(setups: dict[str, Setup]) -> str:
     lines.append("| Setup | Hit@1 | Hit@4 | MRR@10 | " + " | ".join(categories) + " | ms/query |")
     lines.append("|" + "---|" * (len(categories) + 5))
     misses: dict[str, list[str]] = {}
+    scores: dict[str, dict[str, float]] = {}
     with get_session() as session:
         for name, fn in setups.items():
             ranks: list[int | None] = []
@@ -89,6 +92,7 @@ def retrieval_report(setups: dict[str, Setup]) -> str:
             ms = 1000 * (time.perf_counter() - started) / len(cases)
             hit1, hit4 = [r == 1 for r in ranks], [r is not None and r <= 4 for r in ranks]
             mrr = statistics.mean(1 / r if r else 0 for r in ranks)
+            scores[name] = {"hit1": sum(hit1) / len(hit1), "hit4": sum(hit4) / len(hit4), "mrr": mrr}
             lines.append(
                 f"| {name} | {pct(hit1)} | {pct(hit4)} | {mrr:.3f} | "
                 + " | ".join(pct(by_cat[c]) for c in categories)
@@ -105,9 +109,9 @@ def retrieval_report(setups: dict[str, Setup]) -> str:
 
         positive = [top_similarity(c) for c in cases]
         negative = {c["id"]: top_similarity(c) for c in negatives}
-    threshold = settings.relevance_threshold
+    threshold = relevance_threshold(settings)
     refused = sum(s < threshold for s in negative.values())
-    scores = ", ".join(f"{i} {s:.2f}" for i, s in sorted(negative.items(), key=lambda x: x[1]))
+    listed = ", ".join(f"{i} {s:.2f}" for i, s in sorted(negative.items(), key=lambda x: x[1]))
     lines += ["", "Category columns show Hit@1. Not at rank 1 (rank in brackets, None = not in top 10):", ""]
     lines += [f"- **{n}**: {', '.join(m) or 'none'}" for n, m in misses.items()]
     lines += [
@@ -116,10 +120,10 @@ def retrieval_report(setups: dict[str, Setup]) -> str:
         "",
         f"- Answerable questions: top similarity min {min(positive):.3f}, "
         f"median {statistics.median(positive):.3f}; wrongly refused: {sum(s < threshold for s in positive)}",
-        f"- Out-of-scope questions refused by the gate: {refused} of {len(negative)} ({scores}). "
+        f"- Out-of-scope questions refused by the gate: {refused} of {len(negative)} ({listed}). "
         "The rest must be refused by the grounded answer step.",
     ]
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n", scores
 
 
 def setup(mode: Mode, keyword_weight: float = 0.0, k: int = 10) -> Setup:
@@ -175,7 +179,7 @@ def grade(case: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def answers_report(part: int = 1, parts: int = 1) -> str:
+def answers_report(part: int = 1, parts: int = 1, judge_model: str | None = None) -> str:
     from car_support.pipeline.graph import build_graph, new_state
 
     graph = build_graph()
@@ -189,7 +193,17 @@ def answers_report(part: int = 1, parts: int = 1) -> str:
             out = graph.invoke(state)
         except Exception as exc:  # a crash is a failed question, not a failed evaluation
             out = {"answer": f"ERROR: {exc}", "outcome": "error", "passages": [], "citations": []}
-        rows.append((case, out, grade(case, out), time.perf_counter() - started))
+        g = grade(case, out)
+        if judge_model and case["route"] == "kb" and out["outcome"] == "answer":
+            from judge import judge  # eval/judge.py
+
+            try:
+                g["verdict"] = judge(
+                    judge_model, case["question"], out["answer"], out.get("sources", []), case["facts"]
+                )
+            except Exception as exc:  # quota or provider error: count as not judged
+                g["judge_error"] = str(exc)[:120]
+        rows.append((case, out, g, time.perf_counter() - started))
 
     settings = get_settings()
     latencies = sorted(r[3] for r in rows)
@@ -204,19 +218,44 @@ def answers_report(part: int = 1, parts: int = 1) -> str:
         f"Latency per question: median {statistics.median(latencies):.1f} s, "
         f"p95 {latencies[int(0.95 * (len(latencies) - 1))]:.1f} s.",
         "",
-        "| Category | n | Routed | Correct | Cites relevant |",
-        "|---|---|---|---|---|",
+        "| Category | n | Routed | Correct | Cites relevant |"
+        + (" Judge: faithful | Judge: correct |" if judge_model else ""),
+        "|---|---|---|---|---|" + ("---|---|" if judge_model else ""),
     ]
     by_cat: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for case, _, g, _ in rows:
         by_cat[case["category"]].append(g)
     for cat, grades in [*sorted(by_cat.items()), ("**all**", [r[2] for r in rows])]:
         cites = [g["cites_relevant"] for g in grades if g["cites_relevant"] is not None]
+        verdicts = [g["verdict"] for g in grades if "verdict" in g]
+        judged = (
+            f" {pct([v.faithful for v in verdicts])} | {pct([v.correct for v in verdicts])} |"
+            if judge_model
+            else ""
+        )
         lines.append(
             f"| {cat} | {len(grades)} | {pct([g['routed'] for g in grades])} | "
-            f"{pct([g['correct'] for g in grades])} | {pct(cites)} |"
+            f"{pct([g['correct'] for g in grades])} | {pct(cites)} |" + judged
         )
-    lines += ["", "### Failures", ""]
+    if judge_model:
+        judged_rows = [(c, g) for c, _, g, _ in rows if "verdict" in g]
+        errors = sum("judge_error" in g for _, _, g, _ in rows)
+        lines += [
+            "",
+            f"Judge `{judge_model}` graded {len(judged_rows)} answered knowledge-base questions"
+            + (f" ({errors} could not be judged: quota or provider errors)." if errors else "."),
+            "",
+            "### Judge: unfaithful or incorrect",
+            "",
+        ]
+        for case, g in judged_rows:
+            v = g["verdict"]
+            if not (v.faithful and v.correct):
+                flags = ", ".join(
+                    n for n, ok in [("unfaithful", v.faithful), ("incorrect", v.correct)] if not ok
+                )
+                lines.append(f"- **{case['id']}** ({flags}) {case['question']}  \n  → {v.reason}")
+    lines += ["", "### Failures (deterministic checks)", ""]
     for case, out, g, _ in rows:
         if not g["correct"]:
             why = (
@@ -238,12 +277,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("suite", choices=["retrieval", "answers"])
     parser.add_argument("--part", default="1/1", help="answers only: run every n-th question, e.g. 2/3")
+    parser.add_argument("--judge", help="answers only: LLM judge model, e.g. groq:qwen/qwen3.8-27b")
+    parser.add_argument("--min-hit4", type=float, help="retrieval only: fail if dense Hit@4 is lower")
+    parser.add_argument("--min-mrr", type=float, help="retrieval only: fail if dense MRR@10 is lower")
     args = parser.parse_args()
     suite = args.suite
     part, parts = map(int, args.part.split("/"))
     settings = get_settings()
     if suite == "retrieval":
-        report = retrieval_report(
+        report, scores = retrieval_report(
             {
                 "dense": setup("dense"),
                 "keyword (Postgres full-text)": setup("keyword"),
@@ -252,13 +294,22 @@ def main() -> None:
             }
         )
         name = f"retrieval-{settings.embed_model}"
+        dense = scores["dense"]
+        failed = [
+            f"{metric} {dense[key]:.3f} < {minimum}"
+            for metric, key, minimum in [("Hit@4", "hit4", args.min_hit4), ("MRR@10", "mrr", args.min_mrr)]
+            if minimum is not None and dense[key] < minimum
+        ]
     else:
-        report = answers_report(part, parts)
+        report = answers_report(part, parts, args.judge)
+        failed = []
         name = f"answers-{settings.chat_model}" + (f"-part{part}of{parts}" if parts > 1 else "")
     out = EVAL_DIR / "results" / (name.replace(":", "-").replace("/", "-") + ".md")
     out.parent.mkdir(exist_ok=True)
     out.write_text(report, encoding="utf-8")
     sys.stdout.write(report)
+    if failed:
+        sys.exit("Retrieval gate failed: " + "; ".join(failed))
 
 
 if __name__ == "__main__":

@@ -37,3 +37,71 @@ jobs:
       - run: npm run typecheck
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e  # builds the app, then runs the smoke tests against a mocked API
+
+  # Retrieval quality gate: index the real corpus with a real (small) embedding model and fail if Hit@4 or
+  # MRR drops. Thresholds sit just under the values measured for qwen3-embedding:0.6b (ADR 0003).
+  retrieval-gate:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: car_support
+          POSTGRES_PASSWORD: car_support
+          POSTGRES_DB: car_support
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U car_support" --health-interval 5s --health-retries 10
+    env:
+      CS_EMBED_MODEL: qwen3-embedding:0.6b  # the 4B model is too slow to index on a CPU runner
+      CS_QUERY_EMBEDDING_ON_CPU: "false"   # the runner has no GPU; this just avoids a needless reload
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ~/.ollama/models
+          key: ollama-qwen3-embedding-0.6b
+      - name: Install Ollama and pull the embedding model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve > /tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do curl -s localhost:11434/api/version && break; sleep 1; done
+          ollama pull "$CS_EMBED_MODEL"
+      - run: uv sync --locked
+      - run: uv run alembic upgrade head
+      - run: uv run car-support ingest
+      - run: uv run python eval/run.py retrieval --min-hit4 0.88 --min-mrr 0.76
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: retrieval-report
+          path: backend/eval/results/retrieval-qwen3-embedding-0.6b.md
+
+  security:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+      - name: Python dependencies (pip-audit)
+        working-directory: backend
+        run: |
+          uv export --frozen --no-dev --no-emit-project --format requirements-txt > /tmp/requirements.txt
+          uvx pip-audit --strict --disable-pip -r /tmp/requirements.txt
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+      - name: Frontend production dependencies (npm audit)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+      - name: Vulnerable dependencies, misconfigurations and committed secrets (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-dirs: frontend/node_modules,backend/.venv

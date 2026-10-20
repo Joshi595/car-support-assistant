@@ -83,3 +83,12 @@ def test_off_topic_gate_uses_the_best_similarity() -> None:
     assert is_relevant([passage(0.30), passage(0.55)], threshold=0.40)
     assert not is_relevant([passage(0.30), passage(0.35)], threshold=0.40)
     assert not is_relevant([], threshold=0.40)
+
+
+def test_off_topic_threshold_follows_the_embedding_model() -> None:
+    from car_support.config import Settings, relevance_threshold
+
+    assert relevance_threshold(Settings(embed_model="qwen3-embedding:4b")) == 0.40
+    assert relevance_threshold(Settings(embed_model="qwen3-embedding:0.6b")) == 0.28
+    assert relevance_threshold(Settings(embed_model="some-other-model")) == 0.0  # unmeasured: no gate
+    assert relevance_threshold(Settings(embed_model="qwen3-embedding:4b", relevance_threshold=0.5)) == 0.5

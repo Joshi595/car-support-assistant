@@ -36,3 +36,7 @@ The production corpus is far harder than the prototype's: 408 chunks instead of 
 - Memory: the 4B embedding model needs about 3.4 GB of GPU memory, the same as gemma3:4b. On a 6 GB laptop GPU, Ollama cannot keep both resident, so Phase 4 measures the swap cost end to end. The fallbacks are the 0.6B embedder or a cloud chat model.
 - Re-indexing with another embedding model re-embeds everything automatically, because chunk IDs include the model name (about 2.5 minutes here).
 - Known weak spots, to revisit with real questions: the public GOV.UK pages (62% at rank 1), where long guides compete with each other, and cross-lingual questions (75%).
+
+## Update (Phase 9): the off-topic threshold depends on the embedding model
+
+The CI retrieval gate indexes with `qwen3-embedding:0.6b`, and there the 0.40 threshold wrongly refused 3 answerable questions: the smaller model's similarities run lower (lowest answerable 0.303 vs 0.448). The threshold is therefore no longer a single number but a per-model default measured on the golden set (`RELEVANCE_THRESHOLDS` in `config.py`: 0.40 for 4B, 0.28 for 0.6B). An unmeasured model gets no gate; the grounded answer step still refuses. `CS_RELEVANCE_THRESHOLD` overrides it.
