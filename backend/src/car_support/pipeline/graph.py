@@ -26,6 +26,7 @@ from car_support.config import get_settings
 from car_support.db.session import get_session
 from car_support.guardrails import is_injection, leaks_prompt, redact, scrub_echo
 from car_support.llm import chat_model, structured_model
+from car_support.observability import BLOCKED, CACHE, MODEL_ERRORS, TOOL_ERRORS, timed
 from car_support.pipeline import cache, tools
 from car_support.pipeline.prompts import (
     ANSWER_PROMPT,
@@ -66,7 +67,14 @@ class State(TypedDict, total=False):
 
 
 def new_state(question: str, market: str, history: list[tuple[str, str]] | None = None) -> State:
-    return {"question": question, "market": market, "history": history or [], "as_of": date.today()}
+    # Personal data never enters the graph (so it never reaches a model, a log or a trace), except a VIN,
+    # which the recall tool needs; models still only see "[vin]" (see understand).
+    return {
+        "question": redact(question, keep=frozenset({"vin"})),
+        "market": market,
+        "history": history or [],
+        "as_of": date.today(),
+    }
 
 
 # ── understand ─────────────────────────────────────────────────────────────────
@@ -94,6 +102,7 @@ def guard(s: State) -> State:
     language = detect_language(s["question"])
     if is_injection(s["question"]):
         log.info("guard: prompt-injection attempt refused")
+        BLOCKED.inc()
         return {"language": language, "answer": OFF_TOPIC[language], "citations": [], "outcome": "blocked"}
     return {"language": language}
 
@@ -113,6 +122,7 @@ def understand(s: State) -> State:
         result = structured_model(Understanding).invoke([("user", prompt)])
     except Exception:  # model down, invalid JSON, provider error: degrade to rules, do not fail the request
         log.warning("understand: structured output failed, using rules", exc_info=True)
+        MODEL_ERRORS.labels("understand").inc()
         result = _fallback_understanding(s["question"])
     if not result.standalone_question.strip():
         result = result.model_copy(update={"standalone_question": s["question"]})
@@ -176,6 +186,7 @@ def generate(s: State) -> State:
         message = chat_model().invoke([("system", system), ("user", s["understanding"].standalone_question)])
     except Exception:  # model down after retry and fallback: say so and offer a human, never crash the chat
         log.exception("generate: chat model failed")
+        MODEL_ERRORS.labels("generate").inc()
         return {"answer": _TEXT["unavailable"][language], "citations": [], "outcome": "unavailable"}
     return {"answer": str(message.content).strip()}
 
@@ -245,6 +256,7 @@ def cache_lookup(s: State) -> State:
             s["understanding"].standalone_question, s["market"], s["language"], s["as_of"], session
         )
         hit = cache.lookup(session, key)
+    CACHE.labels("miss" if hit is None else "hit").inc()
     if hit is None:
         return {"cache_key": key}
     citations = [src["n"] for src in hit.citations]
@@ -321,6 +333,7 @@ def recall(s: State) -> State:
         report = tools.find_recalls(make, model, year)
     except tools.ToolUnavailableError:
         log.warning("recall: NHTSA unavailable", exc_info=True)
+        TOOL_ERRORS.labels("recalls").inc()
         return {"answer": _TEXT["unavailable"][lang], "outcome": "unavailable"}
     except ValueError:
         return {"answer": _TEXT["recall_need"][lang], "outcome": "clarify"}
@@ -345,6 +358,7 @@ def chargers(s: State) -> State:
         label, found = tools.find_chargers(u.location)
     except tools.ToolUnavailableError as exc:  # also raised when no API key is configured
         log.warning("chargers: service unavailable: %s", exc)
+        TOOL_ERRORS.labels("chargers").inc()
         return {"answer": _TEXT["unavailable"][lang], "outcome": "unavailable"}
     except ValueError:
         return {"answer": _TEXT["charger_need"][lang], "outcome": "clarify"}
@@ -383,7 +397,7 @@ def build_graph() -> CompiledStateGraph[Any, Any, Any, Any]:
         ("handoff", handoff),
         ("off_topic", off_topic),
     ]:
-        g.add_node(name, node)  # type: ignore[call-overload]
+        g.add_node(name, timed(name)(node))  # type: ignore[call-overload]
     g.add_edge(START, "guard")
     g.add_conditional_edges("guard", route_guard)
     g.add_conditional_edges("understand", route_intent)

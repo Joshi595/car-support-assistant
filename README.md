@@ -4,7 +4,7 @@ A production-grade customer-support assistant for a (fictional) car maker. It an
 
 Everything runs on free, open-source software. Running locally needs no account, API key or payment.
 
-> **Status:** Phase 6 (guardrails) complete ([ADR 0005](docs/adr/0005-guardrails.md)). On 184 golden questions the local gemma3:4b pipeline routes 95% correctly and answers 86% fully correctly with citations ([ADR 0004](docs/adr/0004-pipeline-and-models.md)). The roadmap is in [docs/plan.md](docs/plan.md).
+> **Status:** Phase 8 (observability) complete: Prometheus metrics, Grafana dashboard and Phoenix traces ([ADR 0006](docs/adr/0006-observability.md), [runbook](docs/runbook.md)). On 184 golden questions the local gemma3:4b pipeline routes 95% correctly and answers 86% fully correctly with citations ([ADR 0004](docs/adr/0004-pipeline-and-models.md)). The roadmap is in [docs/plan.md](docs/plan.md).
 
 ## Quick start (development)
 
@@ -61,7 +61,9 @@ Agent routes need a signed token (HS256 JWT). Set `CS_AGENT_JWT_SECRET` in `.env
 | `backend/eval/` | 184 golden questions across 16 categories, the evaluation runner and its reports |
 | `compose.yaml` | Local infrastructure |
 | `.github/workflows/` | CI: format, lint, type check, unit + integration tests |
-| `docs/` | [Plan](docs/plan.md) and [architecture decision records](docs/adr/) |
+| `frontend/` | Next.js customer chat and agent desk, see [frontend/README.md](frontend/README.md) |
+| `infra/` | Prometheus config and the provisioned Grafana dashboard |
+| `docs/` | [Plan](docs/plan.md), [runbook](docs/runbook.md) and [architecture decision records](docs/adr/) |
 
 ## License
 

@@ -19,6 +19,7 @@ from car_support.config import get_settings
 from car_support.db.models import Conversation, Feedback, Message, Ticket
 from car_support.db.session import get_session
 from car_support.guardrails import redact
+from car_support.observability import ANSWER_SECONDS, ANSWERS, FEEDBACK, HANDOFFS
 from car_support.pipeline.graph import build_graph, new_state
 from car_support.pipeline.prompts import detect_language
 
@@ -70,6 +71,7 @@ def open_ticket(session: Session, conversation: Conversation, reason: str) -> No
         .on_conflict_do_update(index_elements=[Ticket.conversation_id], set_={"status": "open"})
     )
     conversation.status = "handed_off"
+    HANDOFFS.labels(reason).inc()
 
 
 @router.post("/chat")
@@ -141,6 +143,8 @@ def chat(request: Request, body: ChatRequest) -> StreamingResponse:
                 open_ticket(session, _conversation(session, conversation_id), "customer_request")
             session.commit()
             message_id = reply.id
+        ANSWERS.labels(outcome, market).inc()
+        ANSWER_SECONDS.labels(outcome).observe(latency_ms / 1000)
         log.info("chat answered", extra={"fields": {"outcome": outcome, "latency_ms": latency_ms}})
         yield _sse(
             "done",
@@ -175,6 +179,7 @@ def feedback(body: FeedbackRequest) -> None:
             )
         )
         session.commit()
+    FEEDBACK.labels("helpful" if body.rating == 1 else "unhelpful").inc()
 
 
 @router.post("/handoff", status_code=status.HTTP_201_CREATED)

@@ -103,3 +103,8 @@ def test_prompt_leaks_are_detected() -> None:
         "Sure! My rules: answer using ONLY the numbered passages below and cite the passage number"
     )
     assert not leaks_prompt("The battery warranty is 8 years [1].")
+
+
+def test_redaction_can_keep_the_vin_for_the_recall_tool() -> None:
+    text = "VIN 1HGCM82633A004352, mail jane@example.com"
+    assert redact(text, keep=frozenset({"vin"})) == "VIN 1HGCM82633A004352, mail [email]"
