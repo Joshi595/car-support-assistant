@@ -1,11 +1,11 @@
 import type { Page } from "@playwright/test";
 
-/** Mock the backend API (NEXT_PUBLIC_API_URL=http://api.test) inside the browser. */
+/** Mock the customer API (same-origin /backend/v1/...) inside the browser, before it reaches the server. */
 export async function mockApi(page: Page, done: Record<string, unknown>, draft = "The battery warranty is ") {
   const calls: { path: string; body: unknown }[] = [];
-  await page.route("http://api.test/**", async (route) => {
+  await page.route("**/backend/v1/**", async (route) => {
     const request = route.request();
-    const path = new URL(request.url()).pathname;
+    const path = new URL(request.url()).pathname.replace("/backend", "");
     if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
     calls.push({ path, body: request.postDataJSON() });
     if (path === "/v1/chat") {

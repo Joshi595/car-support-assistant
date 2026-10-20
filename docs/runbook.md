@@ -12,6 +12,13 @@ CS_TRACING_ENDPOINT=http://127.0.0.1:6006/v1/traces uv run car-support serve
 cd ../frontend && npm run dev                          # http://127.0.0.1:3000, agent desk at /agent
 ```
 
+Everything in containers instead (from the repository root):
+
+```bash
+docker compose --profile app up -d --build && docker compose run --rm api car-support ingest
+cloudflared tunnel --url http://localhost:3000     # optional public demo link, valid while it runs
+```
+
 ## Watch
 
 | Where | What to look at |

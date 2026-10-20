@@ -179,6 +179,8 @@ Each phase ends with passing tests, the eval updated where relevant, and its own
 - **Free public demo:** frontend on Vercel (Hobby); API on a Hugging Face Docker Space (CPU, with the Ollama embedder inside); Neon free Postgres (pgvector); Groq free-tier LLM. Deployed by `deploy-demo.yml`. Trade-offs: cold starts while the Space or Neon sleeps, and rate limits. The demo shows a "fictional brand data" banner. Free-tier limits are re-checked before setup.
 - Docs: README (quick start, architecture, eval results, decisions), `architecture.md`, `runbook.md` (re-index, rotate keys, add a market or language), `data-sources.md`, and ADRs for the main choices.
 
+- **Outcome:** the free-terms re-check found that Hugging Face Docker Spaces now need a paid plan, and that no no-card host fits the API, so by rule 5 the public demo runs on the local stack through a Cloudflare quick tunnel (no account). See [ADR 0007](adr/0007-deployment.md).
+
 ### Phase 11: Learning guide, production edition (PDF), written last
 - A companion to `RAG_Project_Concepts_Guide.pdf`, in the same style and with the same box types (Key idea, Analogy, In this project, If you are asked, Pitfall), so it reads as "part 2" of that guide.
 - It explains **what changed from the prototype to production, how, and why**, chapter by chapter: data and catalog, conversion and chunking, Postgres + pgvector, incremental indexing, hybrid SQL search with filters and versions, embedding-model and reranker choices, the relevance gate, the LangGraph pipeline with router and tools, guardrails, the API, the frontend, observability, LLM-as-judge and CI, deployment and the zero-cost setup.

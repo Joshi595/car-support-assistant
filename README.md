@@ -1,70 +1,93 @@
 # Car Support Assistant
 
-A production-grade customer-support assistant for a (fictional) car maker. It answers questions from the company's documents with citations, uses live open-data tools (vehicle recalls, EV chargers), hands conversations to human agents, and is fully observable and evaluated in CI.
+A production-grade customer-support assistant for a (fictional) car maker, Northwind Motors. It answers questions from the company's documents with citations, checks vehicle recalls and finds EV chargers through live open data, hands conversations to human agents, and is observable and evaluated in CI.
 
-Everything runs on free, open-source software. Running locally needs no account, API key or payment.
+Everything runs on free, open-source software. Running it locally needs no account, API key or payment.
 
-> **Status:** Phase 8 (observability) complete: Prometheus metrics, Grafana dashboard and Phoenix traces ([ADR 0006](docs/adr/0006-observability.md), [runbook](docs/runbook.md)). On 184 golden questions the local gemma3:4b pipeline routes 95% correctly and answers 86% fully correctly with citations ([ADR 0004](docs/adr/0004-pipeline-and-models.md)). The roadmap is in [docs/plan.md](docs/plan.md).
+| | |
+|---|---|
+| **Answers** | Grounded in 55 documents (DE, UK, US markets; English and German; Markdown, HTML, PDF) plus GOV.UK guidance; every fact cited and checkable |
+| **Quality** | On 184 golden questions, the local `gemma3:4b` pipeline takes the right path 95% of the time and answers 86% fully correctly; retrieval puts a relevant passage in the top 4 for 97% |
+| **Safety** | Personal data removed before any model, log or trace sees it; prompt-injection attempts refused before any model call; answers without valid citations are not shown |
+| **Operations** | Streaming API, agent desk with handoff tickets, Prometheus/Grafana dashboard, Phoenix traces, CI with retrieval gate, security scans and a nightly LLM-judged evaluation |
 
-## Quick start (development)
+## Run it
 
-Requirements: [uv](https://docs.astral.sh/uv/), [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Podman), [Ollama](https://ollama.com) with `ollama pull qwen3-embedding:4b` and `ollama pull gemma3:4b`. The full local stack wants about 16 GB RAM; see [ADR 0004](docs/adr/0004-pipeline-and-models.md) for lighter options.
-
-```bash
-docker compose up -d                 # Postgres + pgvector (add --profile ollama if Ollama is not installed locally)
-cd backend
-cp .env.example .env                 # every value has a working local default
-uv sync                              # install dependencies into backend/.venv
-uv run alembic upgrade head          # create the database schema
-uv run car-support ingest            # index data/ (incremental; --full to rebuild)
-uv run car-support serve             # API on http://127.0.0.1:8000, docs at /docs
-```
-
-Ask a question (the answer streams as Server-Sent Events):
+Requirements: [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Podman) and [Ollama](https://ollama.com) with `ollama pull qwen3-embedding:4b` and `ollama pull gemma3:4b`. The full local stack wants about 16 GB RAM; see [ADR 0004](docs/adr/0004-pipeline-and-models.md) for lighter options.
 
 ```bash
-curl -N http://127.0.0.1:8000/v1/chat -H "Content-Type: application/json" \
-     -d '{"market": "uk", "message": "How long is the battery warranty?"}'
+cp backend/.env.example backend/.env          # optional keys (Groq, Open Charge Map), agent secret
+cp frontend/.env.example frontend/.env.local  # agent sign-in settings
+docker compose --profile app up -d --build    # Postgres, API (:8000) and web app (:3000)
+docker compose run --rm api car-support ingest   # index the knowledge base once (incremental later)
 ```
 
-Tests and evaluation:
+Open http://127.0.0.1:3000 for the chat and http://127.0.0.1:3000/agent for the agent desk. Add `--profile observability` for Phoenix (:6006), Prometheus (:9090) and Grafana (:3001).
+
+### Public demo (free, no account)
 
 ```bash
-uv run pytest                                 # unit + integration tests (integration tests need Docker)
-uv run python eval/run.py retrieval           # retrieval metrics       -> eval/results/
-uv run python eval/run.py answers             # full pipeline, 184 questions -> eval/results/
+cloudflared tunnel --url http://localhost:3000   # prints a https://...trycloudflare.com link
 ```
 
-Code quality: `uv run ruff format . && uv run ruff check . && uv run mypy src tests alembic eval`. Install the git hooks once with `uv run pre-commit install`.
+The link works while the command runs and changes each time; see [ADR 0007](docs/adr/0007-deployment.md) for why there is no always-on free host.
 
-## API
+### Develop
 
-| Route | Who | Purpose |
-|---|---|---|
-| `POST /v1/chat` | customer | Ask a question. Streams `meta` (conversation id), `token` (draft text) and `done` (validated answer, outcome, sources, whether to offer a human). |
-| `POST /v1/feedback` | customer | Thumbs up/down on an answer (`rating` 1 or -1, optional comment). |
-| `POST /v1/handoff` | customer | Accept the offer to talk to a person; opens a ticket. |
-| `GET /v1/conversations/{id}` | customer | The conversation so far (the random id is the customer's handle). |
-| `GET /v1/admin/tickets`, `GET/PATCH /v1/admin/tickets/{id}` | agent | Handoff queue with full transcript and cited sources; take and resolve tickets. |
-| `GET /v1/admin/feedback` | agent | Rated answers with their questions (`?rating=-1` for the bad ones). |
-| `POST /v1/admin/reindex` | agent | Incremental re-index of `data/` in the background. |
-| `GET /healthz`, `GET /readyz` | ops | Liveness; readiness (database and Ollama reachable). |
+```bash
+docker compose up -d                       # Postgres only
+cd backend && uv sync && uv run alembic upgrade head && uv run car-support ingest
+uv run car-support serve                   # add --reload while editing
+cd ../frontend && npm install && npm run dev
+```
 
-Agent routes need a signed token (HS256 JWT). Set `CS_AGENT_JWT_SECRET` in `.env`, then `uv run car-support agent-token you@example.com` prints one for development; in production the frontend's sign-in issues it. Personal data (emails, phone numbers, VINs, IBANs, card numbers) is redacted before any model sees a message and before it is stored; clear prompt-injection attempts are refused before any model call. Knowledge-base answers are cached per question, market, language, date, index version and model.
+Tests and evaluation (from `backend/` unless noted):
 
-## Repository layout
+```bash
+uv run pytest                                                   # 250+ unit and integration tests (Docker needed)
+uv run python eval/run.py retrieval                             # retrieval metrics -> eval/results/
+uv run python eval/run.py answers --judge groq:qwen/qwen3.8-27b # full pipeline + LLM judge (needs a free Groq key)
+cd ../frontend && npm run lint && npm run typecheck && npm run test:e2e
+```
+
+## How it works
+
+```
+Browser ── Next.js web app ── /backend/* ──► FastAPI ──► LangGraph pipeline
+                     └── /api/agent/* (signed-in agents) ──┘     guard → understand → cache → retrieve → generate → validate
+                                                                   └► recall (NHTSA) · chargers (Open Charge Map) · handoff
+FastAPI ──► Postgres + pgvector (documents, chunks, conversations, tickets, feedback, cache)
+        ──► Ollama (qwen3-embedding:4b, gemma3:4b) or Groq's free tier
+        ──► /metrics (Prometheus → Grafana) · OpenTelemetry traces (Phoenix)
+```
+
+Details: [architecture](docs/architecture.md), [runbook](docs/runbook.md), [data](data/README.md), [frontend](frontend/README.md).
+
+## Decisions
+
+Every choice was measured on the golden set; each record gives the numbers.
+
+| ADR | Decision |
+|---|---|
+| [0001](docs/adr/0001-postgres-pgvector-single-store.md) | One Postgres + pgvector store for vectors, keywords, filters and app data |
+| [0002](docs/adr/0002-ingestion-pipeline.md) | Convert every format to Markdown, chunk by heading, index incrementally by content hash |
+| [0003](docs/adr/0003-retrieval.md) | Dense search with `qwen3-embedding:4b` (Hit@1 87%, Hit@4 97%), no reranker (measured: no gain), per-model off-topic gate |
+| [0004](docs/adr/0004-pipeline-and-models.md) | One structured "understand" call plus deterministic guards; local model by default, free cloud tier optional |
+| [0005](docs/adr/0005-guardrails.md) | Rules first, model-based checks on top; no personal data reaches models; output validation |
+| [0006](docs/adr/0006-observability.md) | Prometheus metrics, Grafana dashboard, Phoenix traces without personal data |
+| [0007](docs/adr/0007-deployment.md) | Containers, one public origin, Cloudflare quick tunnel for the free demo |
+
+## Repository
 
 | Path | Contents |
 |---|---|
-| `backend/` | Python package `car_support`: config, ingestion (`ingest/`), retrieval, pipeline (`pipeline/`), HTTP API (`api/`), guardrails, CLI; Alembic migrations; tests |
-| `data/` | Knowledge base: fictional brand corpus (DE/UK/US, EN/DE, md/html/pdf) and open-licensed public guidance, see [data/README.md](data/README.md) |
-| `backend/eval/` | 184 golden questions across 16 categories, the evaluation runner and its reports |
-| `compose.yaml` | Local infrastructure |
-| `.github/workflows/` | CI: format, lint, type check, unit + integration tests |
-| `frontend/` | Next.js customer chat and agent desk, see [frontend/README.md](frontend/README.md) |
-| `infra/` | Prometheus config and the provisioned Grafana dashboard |
-| `docs/` | [Plan](docs/plan.md), [runbook](docs/runbook.md) and [architecture decision records](docs/adr/) |
+| `backend/` | Python package `car_support`: ingestion, retrieval, pipeline, API, guardrails, observability, CLI; migrations; tests; `eval/` with the golden set, runner and judge |
+| `frontend/` | Next.js customer chat and agent desk |
+| `data/` | Knowledge base and its catalog |
+| `infra/` | Prometheus config and the Grafana dashboard |
+| `.github/workflows/` | CI (lint, types, tests, Playwright, retrieval gate, security) and the nightly evaluation |
+| `docs/` | Plan, architecture, runbook, decision records |
 
 ## License
 
-MIT
+MIT. The knowledge base is fictional, except the GOV.UK pages (Open Government Licence v3.0); live data from NHTSA (public domain), OpenStreetMap (ODbL) and Open Charge Map (CC BY 4.0) is attributed where shown.

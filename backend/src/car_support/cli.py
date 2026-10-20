@@ -38,7 +38,13 @@ def main(argv: list[str] | None = None) -> None:
         import uvicorn
 
         uvicorn.run(
-            "car_support.api.main:app", host=settings.api_host, port=settings.api_port, reload=args.reload
+            "car_support.api.main:app",
+            host=settings.api_host,
+            port=settings.api_port,
+            reload=args.reload,
+            # The client IP comes from X-Forwarded-For when the web app forwards a customer's request.
+            proxy_headers=True,
+            forwarded_allow_ips=settings.forwarded_allow_ips,
         )
     elif args.command == "agent-token":
         from car_support.api.auth import issue_token

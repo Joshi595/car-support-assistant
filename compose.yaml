@@ -1,4 +1,10 @@
-# Local stack. `docker compose up -d` starts Postgres; add `--profile ollama` if Ollama is not installed on the host.
+# Local stack.
+#   docker compose up -d                                     Postgres only (develop the API/frontend on the host)
+#   docker compose --profile app up -d --build               + API (8000) and web app (3000) in containers
+#   docker compose --profile app --profile observability up -d --build   + Phoenix, Prometheus, Grafana
+# Ollama runs on the host by default (GPU access is simplest there); add --profile ollama to run it in a
+# container instead and set CS_OLLAMA_URL=http://ollama:11434 in ./.env.
+# After the first start, index the knowledge base once:  docker compose run --rm api car-support ingest
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -13,9 +19,36 @@ services:
       interval: 5s
       retries: 10
 
+  # ── Application (--profile app) ───────────────────────────────────────────────
+  api:
+    profiles: [app]
+    build: {context: ., dockerfile: backend/Dockerfile}
+    ports: ["8000:8000"]
+    env_file: [{path: backend/.env, required: false}]  # keys: CS_GROQ_API_KEY, CS_AGENT_JWT_SECRET, ...
+    environment:
+      CS_DATABASE_URL: postgresql+psycopg://car_support:car_support@postgres:5432/car_support
+      CS_OLLAMA_URL: ${CS_OLLAMA_URL:-http://host.docker.internal:11434}
+      CS_CORS_ORIGINS: '["http://127.0.0.1:3000","http://localhost:3000"]'
+      CS_TRACING_ENDPOINT: ${CS_TRACING_ENDPOINT:-}
+      CS_FORWARDED_ALLOW_IPS: "*"  # trust X-Forwarded-For from the web app (rate limits per customer)
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  web:
+    profiles: [app]
+    build: frontend
+    ports: ["3000:3000"]
+    env_file: [{path: frontend/.env.local, required: false}]  # NEXTAUTH_SECRET, AGENT_JWT_SECRET, AGENT_EMAILS
+    environment:
+      API_URL: http://api:8000  # the browser only talks to the web app, which forwards to the API
+      NEXTAUTH_URL: http://127.0.0.1:3000
+    depends_on: [api]
+
+  # ── Ollama in a container (--profile ollama) ──────────────────────────────────
   ollama:
     profiles: [ollama]
-    image: ollama/ollama
+    image: ollama/ollama:0.40.5
     ports: ["11434:11434"]
     volumes: [ollama:/root/.ollama]
     healthcheck:
@@ -25,14 +58,14 @@ services:
 
   ollama-pull:  # one-shot job: download the models the app needs
     profiles: [ollama]
-    image: ollama/ollama
+    image: ollama/ollama:0.40.5
     environment: [OLLAMA_HOST=ollama:11434]
     entrypoint: ["sh", "-c", "ollama pull qwen3-embedding:4b && ollama pull gemma3:4b"]
     depends_on:
       ollama: {condition: service_healthy}
 
-  # ── Observability (docker compose --profile observability up -d) ─────────────
-  phoenix:  # traces: set CS_TRACING_ENDPOINT=http://127.0.0.1:6006/v1/traces, UI on http://127.0.0.1:6006
+  # ── Observability (--profile observability) ───────────────────────────────────
+  phoenix:  # traces: CS_TRACING_ENDPOINT=http://127.0.0.1:6006/v1/traces (host) or http://phoenix:6006/v1/traces (api container)
     profiles: [observability]
     image: arizephoenix/phoenix:20.23.0
     ports: ["6006:6006"]
