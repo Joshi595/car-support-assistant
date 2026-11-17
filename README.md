@@ -92,4 +92,4 @@ Every choice was measured on the golden set; each record gives the numbers.
 
 ## License
 
-MIT. The knowledge base is fictional, except the GOV.UK pages (Open Government Licence v3.0); live data from NHTSA (public domain), OpenStreetMap (ODbL) and Open Charge Map (CC BY 4.0) is attributed where shown.
+MIT. The knowledge base is fictional, except the GOV.UK pages (Open Government Licence v3.0); live data from NHTSA (public domain), OpenStreetMap (ODbL) and Open Charge Map (CC BY 4.0) is attributed where shown
